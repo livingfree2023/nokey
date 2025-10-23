@@ -351,8 +351,8 @@ configure_xray() {
     if [[ -z $private_key ]]; then
       # Generate keys using xray directly
       keys=$(xray x25519)
-      private_key=$(echo "$keys" | awk '/Private key:/ {print $3}')
-      public_key=$(echo "$keys" | awk '/Public key:/ {print $3}')
+      private_key=$(echo "$keys" | awk '/PrivateKey:/ {print $2}')
+      public_key=$(echo "$keys" | awk '/Password:/ {print $2}')
       log2file "\n私钥 (PrivateKey) = ${cyan}${private_key}${none}"
       log2file "公钥 (PublicKey) = ${cyan}${public_key}${none}" 
     fi

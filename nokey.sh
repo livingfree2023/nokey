@@ -18,6 +18,7 @@ readonly GITHUB_XRAY_OFFICIAL_SCRIPT_ALPINE_URL="https://github.com/XTLS/Xray-in
 readonly GITHUB_XRAY_OFFICIAL_SCRIPT="install-release.sh"
 
 mldsa_enabled=0
+current_hostname=$(hostname)
 
 # Color definitions
 readonly red='\e[91m'
@@ -581,7 +582,7 @@ output_results() {
       ip=[$ip]
     fi
     
-    vless_reality_url_short="vless://${uuid}@${ip}:${port}?flow=xtls-rprx-vision&encryption=none&type=tcp&security=reality&sni=${domain}&fp=${fingerprint}&pbk=${public_key}&sid=${shortid}#${ip}"
+    vless_reality_url_short="vless://${uuid}@${ip}:${port}?flow=xtls-rprx-vision&encryption=none&type=tcp&security=reality&sni=${domain}&fp=${fingerprint}&pbk=${public_key}&sid=${shortid}#${current_hostname}"
 
     log2file "${yellow}二维码生成命令: / For QR code, install qrencode and run: ${none}" 
     log2file "qrencode -t UTF8 -r $URL_FILE" | tee -a "$LOG_FILE"
@@ -611,7 +612,7 @@ output_results() {
     echo -e "${yellow}舒服了 / Done: ${none}" | tee -a "$LOG_FILE"
 
     if [[ $mldsa_enabled == 1 ]]; then
-      vless_reality_url="vless://${uuid}@${ip}:${port}?flow=xtls-rprx-vision&encryption=none&type=tcp&security=reality&sni=${domain}&fp=${fingerprint}&pbk=${public_key}&sid=${shortid}&pqv=${mldsa65Verify}&spx=${spiderx}&#${ip}"
+      vless_reality_url="vless://${uuid}@${ip}:${port}?flow=xtls-rprx-vision&encryption=none&type=tcp&security=reality&sni=${domain}&fp=${fingerprint}&pbk=${public_key}&sid=${shortid}&pqv=${mldsa65Verify}&spx=${spiderx}&#${current_hostname}"
       echo -e "${yellow}完整含mldsa65Verify:${none}"   | tee -a "$LOG_FILE"
       echo -e "${magenta}${vless_reality_url}${none}" | tee -a "$LOG_FILE" | tee "$URL_FILE"
       echo -e "${yellow}简短不含mldsa65Verify:${none}" | tee -a "$LOG_FILE"

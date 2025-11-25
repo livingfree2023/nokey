@@ -7,7 +7,7 @@ readonly LOG_FILE="nokey.log"
 readonly URL_FILE="nokey.url"
 readonly URL_FILE_SHORT="nokey_short.url"
 #readonly DEFAULT_PORT=443
-readonly DEFAULT_DOMAIN="www.yahoo.com"
+readonly DEFAULT_DOMAIN="www.apple.com"
 readonly GITHUB_URL="https://github.com/livingfree2023/xray-vless-reality-nokey"
 readonly GITHUB_CMD="bash <(curl -sL https://raw.githubusercontent.com/livingfree2023/xray-vless-reality-livefree/refs/heads/main/nokey.sh)"
 readonly SERVICE_NAME="xray.service"
@@ -17,6 +17,7 @@ readonly GITHUB_XRAY_OFFICIAL_SCRIPT_URL="https://raw.githubusercontent.com/XTLS
 readonly GITHUB_XRAY_OFFICIAL_SCRIPT_ALPINE_URL="https://github.com/XTLS/Xray-install/raw/main/alpinelinux/install-release.sh"
 readonly GITHUB_XRAY_OFFICIAL_SCRIPT="install-release.sh"
 
+mldsa_enabled=0
 
 # Color definitions
 readonly red='\e[91m'
@@ -286,6 +287,9 @@ parse_args() {
         --mldsa65Verify=*)
           mldsa65Verify="${arg#*=}"
           ;;
+        --mldsa)
+          mldsa_enabled=1
+          ;;
         --shortid=*)
           shortid="${arg#*=}"
           ;;
@@ -367,25 +371,24 @@ configure_xray() {
     fi
     echo -e "[${green}OK${none}]" | tee -a  "$LOG_FILE"
 
-    # 为了避免攻击者拿到 REALITY 客户端配置再等到未来的量子计算机破解 X25519 后对未来的 REALITY 
-    # 连接进行 MITM，REALITY 协议新增抗量子的 ML-DSA-65 签名验签机制：执行 xray mldsa65 生成 
-    # ML-DSA-65 密钥对，服务端持有 ML-DSA-65 私钥（配置名 mldsa65Seed ），处理连接时会对“cert's 
-    # signature + raw Client Hello + raw Server Hello”的组合进行额外签名并填到 cert's ExtraExtensions；
-    # 客户端若持有 ML-DSA-65 公钥（配置名 mldsa65Verify ），在原有的 REALITY 证书验证阶段会进行额外验证。
-    # 由于 ML-DSA-65 被设计为抵抗量子计算机，即使攻击者拿到了客户端配置即公钥，也无法在未来反推出私钥进而 MITM。
-    # https://github.com/XTLS/Xray-core/pull/4915
-    echo -n -e "${yellow}生成ML-DSA-65密钥对 / Generate ML-DSA-65 Keys  ... ${none}" | tee -a "$LOG_FILE"
-    if [[ -z $mldsa65Seed || -z $mldsa65Verify ]]; then
-      # Generate keys using xray directly
-      log2file "\nmldsa65Seed mldsa65Verify 没有指定，自动生成 / Generating mldsa65keys"
-      mldsa65keys=$(xray mldsa65)
-      mldsa65Seed=$(echo "$mldsa65keys" | awk '/Seed:/ {print $2}')
-      mldsa65Verify=$(echo "$mldsa65keys" | awk '/Verify:/ {print $2}')
-      log2file "私钥 (PrivateKey) = ${cyan}${mldsa65Seed}${none}"
-      log2file "公钥 (PublicKey) = ${cyan}${mldsa65Verify}${none}" 
+    # ML-DSA-65
+    if [[ $mldsa_enabled == 1 ]]; then
+      echo -n -e "${yellow}生成ML-DSA-65密钥对 / Generate ML-DSA-65 Keys  ... ${none}" | tee -a "$LOG_FILE"
+      if [[ -z $mldsa65Seed || -z $mldsa65Verify ]]; then
+        # Generate keys using xray directly
+        log2file "\nmldsa65Seed mldsa65Verify 没有指定，自动生成 / Generating mldsa65keys"
+        mldsa65keys=$(xray mldsa65)
+        mldsa65Seed=$(echo "$mldsa65keys" | awk '/Seed:/ {print $2}')
+        mldsa65Verify=$(echo "$mldsa65keys" | awk '/Verify:/ {print $2}')
+        log2file "私钥 (PrivateKey) = ${cyan}${mldsa65Seed}${none}"
+        log2file "公钥 (PublicKey) = ${cyan}${mldsa65Verify}${none}"
+      fi
+      echo -e "[${green}OK${none}]" | tee -a  "$LOG_FILE"
+    else
+      mldsa65Seed=""
+      mldsa65Verify=""
     fi
-    echo -e "[${green}OK${none}]" | tee -a  "$LOG_FILE"
-    
+
     # 目标网站
     if [[ -z $domain ]]; then
       log2file "用户没有指定自己的SNI，使用默认 / User did not specify SNI, using default"
@@ -409,23 +412,6 @@ configure_xray() {
           "loglevel": "warning"
         },
         "inbounds": [
-          // [inbound] 如果你想使用其它翻墙服务端如(HY2或者NaiveProxy)对接v2ray的分流规则, 那么取消下面一段的注释, 并让其它翻墙服务端接到下面这个socks 1080端口
-          // {
-          //   "listen":"127.0.0.1",
-          //   "port":1080,
-          //   "protocol":"socks",
-          //   "sniffing":{
-          //     "enabled":true,
-          //     "destOverride":[
-          //       "http",
-          //       "tls"
-          //     ]
-          //   },
-          //   "settings":{
-          //     "auth":"noauth",
-          //     "udp":false
-          //   }
-          // },
           {
             "listen": "0.0.0.0",
             "port": ${port},    // ***
@@ -454,7 +440,8 @@ configure_xray() {
             },
             "sniffing": {
               "enabled": true,
-              "destOverride": ["http", "tls", "quic"]
+              "destOverride": ["http", "tls", "quic"],
+              "routeOnly": true
             }
           }
         ],
@@ -463,31 +450,30 @@ configure_xray() {
             "protocol": "freedom",
             "tag": "direct"
           },
-      // [outbound]
-      {
-          "protocol": "freedom",
-          "settings": {
-              "domainStrategy": "UseIPv4"
+          {
+              "protocol": "freedom",
+              "settings": {
+                  "domainStrategy": "UseIPv4"
+              },
+              "tag": "force-ipv4"
           },
-          "tag": "force-ipv4"
-      },
-      {
-          "protocol": "freedom",
-          "settings": {
-              "domainStrategy": "UseIPv6"
+          {
+              "protocol": "freedom",
+              "settings": {
+                  "domainStrategy": "UseIPv6"
+              },
+              "tag": "force-ipv6"
           },
-          "tag": "force-ipv6"
-      },
-      {
-          "protocol": "socks",
-          "settings": {
-              "servers": [{
-                  "address": "127.0.0.1",
-                  "port": 40000 //warp socks5 port
-              }]
+          {
+              "protocol": "socks",
+              "settings": {
+                  "servers": [{
+                      "address": "127.0.0.1",
+                      "port": 40000 //warp socks5 port
+                  }]
+              },
+              "tag": "socks5-warp"
           },
-          "tag": "socks5-warp"
-      },
           {
             "protocol": "blackhole",
             "tag": "block"
@@ -531,6 +517,9 @@ configure_xray() {
       }
 EOF
     )
+    if [[ $mldsa_enabled != 1 ]]; then
+      reality_template=$(echo "$reality_template" | sed '/"mldsa65Seed":/d')
+    fi
     # 配置config.json
     echo -n -e "${yellow}快好了，手搓 / Configuring /usr/local/etc/xray/config.json ... ${none}"
     # TODO: add multiple templates for different protocols
@@ -553,6 +542,7 @@ show_help() {
   echo "  --port=NUMBER      设置端口号 (默认: 随机) / Set port number"
   echo "  --domain=DOMAIN    设置SNI域名 (默认: learn.microsoft.com) / Set SNI domain"
   echo "  --uuid=STRING      设置UUID (默认: 自动生成) / Set UUID"
+  echo "  --mldsa            启用ML-DSA签名生成 (默认: 关闭) / Enable ML-DSA signature generation (default: off)"
   echo "  --mldsa65Seed=STRING  设置ML-DSA-65私钥 (默认: 自动生成) / Set ML-DSA-65 private key"
   echo "  --mldsa65Verify=STRING  设置ML-DSA-65公钥 (默认: 自动生成) / Set ML-DSA-65 public key"
   echo "  --force            强制重装 / Force Reinstall"
@@ -582,15 +572,16 @@ output_results() {
     log2file "公钥 / PublicKey = ${cyan}${public_key}${none}"
     log2file "ShortId = ${cyan}${shortid}${none}"
     log2file "SpiderX = ${cyan}${spiderx}${none}"
-    log2file "mldsa65Seed = ${cyan}${mldsa65Seed}${none}"
-    log2file "mldsa65Verify = ${cyan}${mldsa65Verify}${none}"
+    if [[ $mldsa_enabled == 1 ]]; then
+      log2file "mldsa65Seed = ${cyan}${mldsa65Seed}${none}"
+      log2file "mldsa65Verify = ${cyan}${mldsa65Verify}${none}"
+    fi
 
     if [[ $netstack == "6" ]]; then
       ip=[$ip]
     fi
     
-    vless_reality_url="vless://${uuid}@${ip}:${port}?flow=xtls-rprx-vision&encryption=none&type=tcp&security=reality&sni=${domain}&fp=${fingerprint}&pbk=${public_key}&sid=${shortid}&pqv=${mldsa65Verify}&spx=${spiderx}&#NOKEY_${ip}"
-    vless_reality_url_short="vless://${uuid}@${ip}:${port}?flow=xtls-rprx-vision&encryption=none&type=tcp&security=reality&sni=${domain}&fp=${fingerprint}&pbk=${public_key}&sid=${shortid}#NOKEY_${ip}"
+    vless_reality_url_short="vless://${uuid}@${ip}:${port}?flow=xtls-rprx-vision&encryption=none&type=tcp&security=reality&sni=${domain}&fp=${fingerprint}&pbk=${public_key}&sid=${shortid}#${ip}"
 
     log2file "${yellow}二维码生成命令: / For QR code, install qrencode and run: ${none}" 
     log2file "qrencode -t UTF8 -r $URL_FILE" | tee -a "$LOG_FILE"
@@ -619,11 +610,17 @@ output_results() {
     
     echo -e "${yellow}舒服了 / Done: ${none}" | tee -a "$LOG_FILE"
 
-    echo -e "${yellow}完整含mldsa65Verify:${none}"   | tee -a "$LOG_FILE"
-    echo -e "${magenta}${vless_reality_url}${none}" | tee -a "$LOG_FILE" | tee "$URL_FILE"
-    echo -e "${yellow}简短不含mldsa65Verify:${none}" | tee -a "$LOG_FILE"
-    echo -e "${magenta}${vless_reality_url_short}${none}" | tee -a "$LOG_FILE" | tee "$URL_FILE_SHORT"
-    
+    if [[ $mldsa_enabled == 1 ]]; then
+      vless_reality_url="vless://${uuid}@${ip}:${port}?flow=xtls-rprx-vision&encryption=none&type=tcp&security=reality&sni=${domain}&fp=${fingerprint}&pbk=${public_key}&sid=${shortid}&pqv=${mldsa65Verify}&spx=${spiderx}&#${ip}"
+      echo -e "${yellow}完整含mldsa65Verify:${none}"   | tee -a "$LOG_FILE"
+      echo -e "${magenta}${vless_reality_url}${none}" | tee -a "$LOG_FILE" | tee "$URL_FILE"
+      echo -e "${yellow}简短不含mldsa65Verify:${none}" | tee -a "$LOG_FILE"
+      echo -e "${magenta}${vless_reality_url_short}${none}" | tee -a "$LOG_FILE" | tee "$URL_FILE_SHORT"
+    else
+      echo -e "${yellow}分享链接 / Share Link:${none}" | tee -a "$LOG_FILE"
+      echo -e "${magenta}${vless_reality_url_short}${none}" | tee -a "$LOG_FILE" | tee "$URL_FILE"
+      echo "" > "$URL_FILE_SHORT"
+    fi
 }
 
 download_official_script() {

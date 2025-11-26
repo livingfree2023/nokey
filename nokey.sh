@@ -2,7 +2,7 @@
 
 # Constants and Configuration
 
-readonly SCRIPT_VERSION="2.3" 
+readonly SCRIPT_VERSION="2.4" 
 readonly LOG_FILE="nokey.log"
 readonly URL_FILE="nokey.url"
 #readonly DEFAULT_PORT=443
@@ -57,7 +57,7 @@ task_done() {
 }
 
 task_done_with_info() {
-    echo -e "[${green}OK: $1${none}]" | tee -a  "$LOG_FILE"
+    echo -e "${cyan}$1${none} [${green}OK${none}]" | tee -a  "$LOG_FILE"
 }
 
 task_fail() {
@@ -91,9 +91,9 @@ add_alias_if_missing() {
       if [ -f "$file" ]; then
           if ! grep -Fxq "$alias_line" "$file"; then
               echo "$alias_line" >> "$file"
-              info "\nAdded alias to $file"
+              # info "\nAdded alias to $file"
           else
-              info "Alias already present in $file"
+              # info "Alias already present in $file"
           fi
       fi
     done
@@ -701,30 +701,30 @@ output_results() {
     # SpiderX
     spiderx=""
 
-    info "地址 / Address = ${cyan}${ip}${none}"
-    info "端口 / Port = ${cyan}${port}${none}"
-    info "用户ID / User ID (UUID) = ${cyan}${uuid}${none}"
-    info "流控 / Flow Control = ${cyan}xtls-rprx-vision${none}"
-    info "加密 / Encryption = ${cyan}none${none}"
-    info "传输协议 / Network Protocol = ${cyan}tcp${none}"
-    info "伪装类型 / Header Type = ${cyan}none${none}"
-    info "底层传输安全 / Transport Security = ${cyan}reality${none}"
-    info "SNI = ${cyan}${domain}${none}"
-    info "指纹 / Fingerprint = ${cyan}${fingerprint}${none}"
-    info "公钥 / PublicKey = ${cyan}${public_key}${none}"
-    info "ShortId = ${cyan}${shortid}${none}"
-    info "SpiderX = ${cyan}${spiderx}${none}"
-    if [[ $mldsa_enabled == 1 ]]; then
-      info "mldsa65Seed = ${cyan}${mldsa65Seed}${none}"
-      info "mldsa65Verify = ${cyan}${mldsa65Verify}${none}"
-    fi
+    # info "地址 / Address = ${cyan}${ip}${none}"
+    # info "端口 / Port = ${cyan}${port}${none}"
+    # info "用户ID / User ID (UUID) = ${cyan}${uuid}${none}"
+    # info "流控 / Flow Control = ${cyan}xtls-rprx-vision${none}"
+    # info "加密 / Encryption = ${cyan}none${none}"
+    # info "传输协议 / Network Protocol = ${cyan}tcp${none}"
+    # info "伪装类型 / Header Type = ${cyan}none${none}"
+    # info "底层传输安全 / Transport Security = ${cyan}reality${none}"
+    # info "SNI = ${cyan}${domain}${none}"
+    # info "指纹 / Fingerprint = ${cyan}${fingerprint}${none}"
+    # info "公钥 / PublicKey = ${cyan}${public_key}${none}"
+    # info "ShortId = ${cyan}${shortid}${none}"
+    # info "SpiderX = ${cyan}${spiderx}${none}"
+    # if [[ $mldsa_enabled == 1 ]]; then
+    #   info "mldsa65Seed = ${cyan}${mldsa65Seed}${none}"
+    #   info "mldsa65Verify = ${cyan}${mldsa65Verify}${none}"
+    # fi
 
     info "${yellow}二维码生成命令: / For QR code, install qrencode and run: ${none}" 
     info "qrencode -t UTF8 -r $URL_FILE" | tee -a "$LOG_FILE"
 
     check_service_status
     
-    info "舒服了 / Done: "
+    # info "舒服了 / Done: "
     
     generate_share_links
     generate_clash_config

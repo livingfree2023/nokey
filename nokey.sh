@@ -2,7 +2,7 @@
 
 # Constants and Configuration
 
-readonly SCRIPT_VERSION="2.2" 
+readonly SCRIPT_VERSION="2.3" 
 readonly LOG_FILE="nokey.log"
 readonly URL_FILE="nokey.url"
 #readonly DEFAULT_PORT=443
@@ -33,19 +33,19 @@ echo > "$LOG_FILE"
 
 # Helper functions
 error() {
-    echo -e "\n${red} $1 ${none}\n" | tee -a "$LOG_FILE"
+    echo -e "\n${red}$1${none}\n" | tee -a "$LOG_FILE"
 }
 
 warn() {
-    echo -e "\n${yellow} $1 ${none}\n" | tee -a "$LOG_FILE"
+    echo -e "\n${yellow}$1${none}\n" | tee -a "$LOG_FILE"
 }
 
 info() {
-    echo -e "${yellow} $1 ${none}" | tee -a "$LOG_FILE"
+    echo -e "${yellow}$1${none}" | tee -a "$LOG_FILE"
 }
 
 success() {
-    echo -e "${green} $1 ${none}" | tee -a "$LOG_FILE"
+    echo -e "${green}$1${none}" | tee -a "$LOG_FILE"
 }
 
 task_start() {
@@ -57,7 +57,7 @@ task_done() {
 }
 
 task_done_with_info() {
-    echo -e "[${green}OK:$1${none}]" | tee -a  "$LOG_FILE"
+    echo -e "[${green}OK: $1${none}]" | tee -a  "$LOG_FILE"
 }
 
 task_fail() {
@@ -161,7 +161,7 @@ install_dependencies() {
         for candidate in "${!os_package_command[@]}"; do
             if command -v "$candidate" > /dev/null 2>&1; then
                 manager=$candidate
-                info "\nfound manager $manager in fallback"
+                # info "\nfound manager $manager in fallback"
                 break
             fi
         done
@@ -177,8 +177,13 @@ install_dependencies() {
     # Check for missing tools
     for tool in "${tools[@]}"; do
         if ! command -v "$tool" > /dev/null 2>&1; then
-            info "$tool is missing"
+            info "$tool is missing, attempting to install."
             eval "$install_cmd" "$tool"  >> "$LOG_FILE" 2>&1
+            if ! command -v "$tool" > /dev/null 2>&1; then
+                task_fail
+                error "Failed to install '$tool'. Please install it manually and re-run the script."
+                exit 1
+            fi
         fi
     done
     
@@ -196,11 +201,21 @@ install_xray() {
     if [ "$ID" = "alpine" ] || [ "$ID_LIKE" = "alpine" ]; then
       info "\nAlpine OS: install xray formal release, alpine install script does not support pre-release"
       ash $GITHUB_XRAY_OFFICIAL_SCRIPT >> $LOG_FILE 2>&1
+      if [[ $? -ne 0 ]]; then
+          task_fail
+          error "Xray installation failed."
+          exit 1
+      fi
       rc-update add xray               >> $LOG_FILE 2>&1
       rc-service xray start            >> $LOG_FILE 2>&1
     else
-      info "\nInstalling latest xray including pre-release"
+      # info "\nInstalling latest xray including pre-release"
       bash $GITHUB_XRAY_OFFICIAL_SCRIPT install  >> "$LOG_FILE" 2>&1
+      if [[ $? -ne 0 ]]; then
+          task_fail
+          error "Xray installation failed."
+          exit 1
+      fi
     fi
 
     task_done
@@ -351,13 +366,21 @@ initialize_variables() {
     task_start "寻找一个无辜的端口 / Find a Random Unused Port"
     if [[ -z $port ]]; then      
       base=$((10000 + RANDOM % 50000))  # Start at a random offset
+      port_found=0
       for i in $(seq 0 1000); do
         port=$((base + i))
-        nc -z 127.0.0.1 $port 2>/dev/null || {
+        (echo > /dev/tcp/127.0.0.1/$port) >/dev/null 2>&1
+        if [[ $? -ne 0 ]]; then
+          port_found=1
           break
-        }
+        fi
       done
-      info "\n找到一个空闲随机端口，如果有防火墙需要放行 / Random unused port found, if firewall enabled, add tcp rules for: ${cyan}$port${none}"
+      if [[ $port_found -eq 0 ]]; then
+        task_fail
+        error "Could not find an unused port."
+        exit 1
+      fi
+      # info "\n找到一个空闲随机端口，如果有防火墙需要放行 / Random unused port found, if firewall enabled, add tcp rules for: ${cyan}$port${none}"
     fi
     task_done_with_info "$port"
 
@@ -376,32 +399,43 @@ generate_crypto() {
     fi
     task_done
 
-    task_start "生成一个密钥 / Generate x25519 keys"
+    
     if [[ -z $private_key ]]; then
       keys=$(xray x25519)
+      if [[ -z "$keys" ]]; then
+        task_fail
+        error "Failed to generate x25519 keys. Is xray installed correctly?"
+        exit 1
+      fi
+      task_start "生成一个私钥 / Generate Private Key"
       private_key=$(echo "$keys" | awk '/PrivateKey:/ {print $2}')
+      task_done_with_info "${private_key}"
+      task_start "生成一个公钥 / Generate Public Key"
       public_key=$(echo "$keys" | awk '/Password:/ {print $2}')
-      info "\n私钥 (PrivateKey) = ${cyan}${private_key}${none}"
-      info "公钥 (PublicKey) = ${cyan}${public_key}${none}" 
+      task_done_with_info "${public_key}" 
     fi
-    task_done
 
     task_start "生成一个shortid / Generate shortid"
     if [[ -z $shortid ]]; then
       shortid=$(generate_shortid)
-      info "\nShortID = ${cyan}${shortid}${none}" 
+      task_done_with_info "${shortid}" 
     fi
-    task_done
+
 
     if [[ $mldsa_enabled == 1 ]]; then
       task_start "生成ML-DSA-65密钥对 / Generate ML-DSA-65 Keys"
       if [[ -z $mldsa65Seed || -z $mldsa65Verify ]]; then
-        info "\nmldsa65Seed mldsa65Verify 没有指定，自动生成 / Generating mldsa65keys"
+        # info "\nmldsa65Seed mldsa65Verify 没有指定，自动生成 / Generating mldsa65keys"
         mldsa65keys=$(xray mldsa65)
+        if [[ -z "$mldsa65keys" ]]; then
+          task_fail
+          error "Failed to generate ML-DSA-65 keys. Is xray installed correctly?"
+          exit 1
+        fi
         mldsa65Seed=$(echo "$mldsa65keys" | awk '/Seed:/ {print $2}')
         mldsa65Verify=$(echo "$mldsa65keys" | awk '/Verify:/ {print $2}')
-        info "私钥 (PrivateKey) = ${cyan}${mldsa65Seed}${none}"
-        info "公钥 (PublicKey) = ${cyan}${mldsa65Verify}${none}"
+        # info "私钥 (PrivateKey) = ${cyan}${mldsa65Seed}${none}"
+        # info "公钥 (PublicKey) = ${cyan}${mldsa65Verify}${none}"
       fi
       task_done
     else
@@ -411,11 +445,11 @@ generate_crypto() {
 }
 
 build_xray_config() {
-    info "网络栈netstack = ${cyan}${netstack}${none}" 
-    info "本机IP = ${cyan}${ip}${none}"
-    info "端口Port = ${cyan}${port}${none}" 
-    info "用户UUID = ${cyan}${uuid}${none}" 
-    info "域名SNI = ${cyan}$domain${none}" 
+    # info "网络栈netstack = ${cyan}${netstack}${none}" 
+    # info "本机IP = ${cyan}${ip}${none}"
+    # info "端口Port = ${cyan}${port}${none}" 
+    # info "用户UUID = ${cyan}${uuid}${none}" 
+    # info "域名SNI = ${cyan}$domain${none}" 
 
     reality_template=$(cat <<-EOF
       { // VLESS + Reality
@@ -534,13 +568,31 @@ EOF
       reality_template=$(echo "$reality_template" | sed '/"mldsa65Seed":/d')
     fi
     task_start "快好了，手搓 / Configuring /usr/local/etc/xray/config.json"
-    echo "$reality_template" > /usr/local/etc/xray/config.json
+    
+    config_path="/usr/local/etc/xray/config.json"
+    config_dir=$(dirname "$config_path")
+
+    if [[ ! -d "$config_dir" ]]; then
+        mkdir -p "$config_dir"
+        if [[ $? -ne 0 ]]; then
+            task_fail
+            error "Failed to create config directory: $config_dir"
+            exit 1
+        fi
+    fi
+    
+    echo "$reality_template" > "$config_path"
+    if [[ $? -ne 0 ]]; then
+        task_fail
+        error "Failed to write xray config to $config_path."
+        exit 1
+    fi
     task_done
 }
 
 restart_xray_service() {
     task_start "冲刺，开启服务 / Starting Service"
-    service xray restart | tee -a "$LOG_FILE" 2>&1
+    service xray restart  >> "$LOG_FILE" 2>&1
     task_done
 }
 configure_xray() {

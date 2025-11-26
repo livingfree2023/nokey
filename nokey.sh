@@ -612,9 +612,9 @@ output_results() {
     echo -e "${yellow}舒服了 / Done: ${none}" | tee -a "$LOG_FILE"
 
     if [[ $mldsa_enabled == 1 ]]; then
-      vless_reality_url="vless://${uuid}@${ip}:${port}?flow=xtls-rprx-vision&encryption=none&type=tcp&security=reality&sni=${domain}&fp=${fingerprint}&pbk=${public_key}&sid=${shortid}&pqv=${mldsa65Verify}&spx=${spiderx}&#${current_hostname}"
+      vless_reality_mldsa_url="vless://${uuid}@${ip}:${port}?flow=xtls-rprx-vision&encryption=none&type=tcp&security=reality&sni=${domain}&fp=${fingerprint}&pbk=${public_key}&sid=${shortid}&pqv=${mldsa65Verify}&spx=${spiderx}&#${current_hostname}"
       echo -e "${yellow}完整含mldsa65Verify:${none}"   | tee -a "$LOG_FILE"
-      echo -e "${magenta}${vless_reality_url}${none}" | tee -a "$LOG_FILE" | tee "$URL_FILE"
+      echo -e "${magenta}${vless_reality_mldsa_url}${none}" | tee -a "$LOG_FILE" | tee "$URL_FILE"
       echo -e "${yellow}简短不含mldsa65Verify:${none}" | tee -a "$LOG_FILE"
       echo -e "${magenta}${vless_reality_url_short}${none}" | tee -a "$LOG_FILE" | tee "$URL_FILE_SHORT"
     else
@@ -622,6 +622,32 @@ output_results() {
       echo -e "${magenta}${vless_reality_url_short}${none}" | tee -a "$LOG_FILE" | tee "$URL_FILE"
       echo "" > "$URL_FILE_SHORT"
     fi
+
+    local server_ip_for_clash=$ip
+    if [[ $netstack == "6" ]]; then
+        # for clash meta, ipv6 does not need bracket.
+        # The ip var is already bracketed for vless url.
+        server_ip_for_clash=${ip:1:-1}
+    fi
+
+    clash_meta_config=$(cat <<-EOF
+- name: ${current_hostname}
+  type: vless
+  server: ${server_ip_for_clash}
+  port: ${port}
+  client-fingerprint: ${fingerprint}
+  tls: true
+  servername: ${domain}
+  flow: xtls-rprx-vision
+  network: tcp
+  reality-opts:
+    public-key: ${public_key}
+    short-id: ${shortid}
+  uuid: ${uuid}
+EOF
+)
+    echo -e "${yellow}Clash.meta 配置 / Clash.meta config block:${none}" | tee -a "$LOG_FILE" | tee "$URL_FILE"
+    echo -e "${cyan}${clash_meta_config}${none}" | tee -a "$LOG_FILE" | tee "$URL_FILE"
 }
 
 download_official_script() {

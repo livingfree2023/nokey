@@ -741,10 +741,12 @@ main() {
 
     show_banner
     echo -e "当前版本 / Version: ${cyan}${SCRIPT_VERSION}${none} " | tee -a "$LOG_FILE"
+    parse_args "$@"
+
     install_dependencies # the next function needs curl, in debian 9 curl is not shipped
     download_official_script
     detect_network_interfaces
-    parse_args "$@"
+    
     install_xray
     configure_xray
     enable_bbr

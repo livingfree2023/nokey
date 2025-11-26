@@ -5,7 +5,6 @@
 readonly SCRIPT_VERSION="20251126" 
 readonly LOG_FILE="nokey.log"
 readonly URL_FILE="nokey.url"
-readonly URL_FILE_SHORT="nokey_short.url"
 #readonly DEFAULT_PORT=443
 readonly DEFAULT_DOMAIN="www.apple.com"
 readonly GITHUB_URL="https://github.com/livingfree2023/xray-vless-reality-nokey"
@@ -29,20 +28,40 @@ readonly cyan='\e[96m'
 readonly none='\e[0m'
 
 
-# Initialize log2file file
+# Initialize info file
 echo > "$LOG_FILE"
 
 # Helper functions
-log2file() {
-    echo -e "$1" >> "$LOG_FILE"
-}
-
 error() {
     echo -e "\n${red} $1 ${none}\n" | tee -a "$LOG_FILE"
 }
 
 warn() {
     echo -e "\n${yellow} $1 ${none}\n" | tee -a "$LOG_FILE"
+}
+
+info() {
+    echo -e "${yellow} $1 ${none}" | tee -a "$LOG_FILE"
+}
+
+success() {
+    echo -e "${green} $1 ${none}" | tee -a "$LOG_FILE"
+}
+
+task_start() {
+    echo -n -e "${yellow}$1 ... ${none}" | tee -a "$LOG_FILE"
+}
+
+task_done() {
+    echo -e "[${green}OK${none}]" | tee -a "$LOG_FILE"
+}
+
+task_done_with_info() {
+    echo -e "[${green}OK:$1${none}]" | tee -a  "$LOG_FILE"
+}
+
+task_fail() {
+    echo -e "[${red}FAILED${none}]" | tee -a "$LOG_FILE"
 }
 
 check_root() {
@@ -67,24 +86,24 @@ config_files=(
 
 # Function to add alias to a file if not already present
 add_alias_if_missing() {
-    echo -n -e "${yellow}添加nokey别名 / Add nokey alias to env ... ${none}" | tee -a "$LOG_FILE"
+    task_start "添加nokey别名 / Add nokey alias to env"
     for file in "${config_files[@]}"; do
       if [ -f "$file" ]; then
           if ! grep -Fxq "$alias_line" "$file"; then
               echo "$alias_line" >> "$file"
-              log2file "\nAdded alias to $file"
+              info "\nAdded alias to $file"
           else
-              log2file "Alias already present in $file"
+              info "Alias already present in $file"
           fi
       fi
     done
-    echo -e "[${green}OK${none}]" | tee -a "$LOG_FILE"
+    task_done
 
 }
 
 # Function to remove alias from files
 remove_alias() {
-    echo -n -e "${yellow}删除nokey别名 / Remove nokey alias from env ... ${none}" | tee -a "$LOG_FILE"
+    task_start "删除nokey别名 / Remove nokey alias from env"
     for file in "${config_files[@]}"; do
         if [ -f "$file" ]; then
             if grep -Fxq "$alias_line" "$file"; then
@@ -95,8 +114,8 @@ remove_alias() {
             fi
         fi
     done
-    log2file "\nUninstallation complete."
-    echo -e "[${green}OK${none}]" | tee -a "$LOG_FILE"
+    info "\nUninstallation complete."
+    task_done
 }
 
 detect_network_interfaces() {
@@ -120,7 +139,7 @@ generate_shortid() {
 
 install_dependencies() {
 
-    echo -n -e "${yellow}开始准备工作 / Starting Preparation ... ${none}" | tee -a "$LOG_FILE"
+    task_start "开始准备工作 / Starting Preparation"
 
     #todo: "qrencode" should be a flag controlled feature
     local tools=("curl")
@@ -142,7 +161,7 @@ install_dependencies() {
         for candidate in "${!os_package_command[@]}"; do
             if command -v "$candidate" > /dev/null 2>&1; then
                 manager=$candidate
-                log2file "\nfound manager $manager in fallback"
+                info "\nfound manager $manager in fallback"
                 break
             fi
         done
@@ -158,12 +177,12 @@ install_dependencies() {
     # Check for missing tools
     for tool in "${tools[@]}"; do
         if ! command -v "$tool" > /dev/null 2>&1; then
-            log2file "$tool is missing"
+            info "$tool is missing"
             eval "$install_cmd" "$tool"  >> "$LOG_FILE" 2>&1
         fi
     done
     
-    echo -e "[${green}OK${none}]" | tee -a "$LOG_FILE"
+    task_done
 
 }
 
@@ -172,19 +191,19 @@ install_xray() {
       uninstall_xray
     fi
 
-    echo -n -e "${yellow}开始，安装或升级XRAY / Install or upgrade XRAY ... ${none}" | tee -a "$LOG_FILE"
+    task_start "开始，安装或升级XRAY / Install or upgrade XRAY"
     
     if [ "$ID" = "alpine" ] || [ "$ID_LIKE" = "alpine" ]; then
-      log2file "\nAlpine OS: install xray formal release, alpine install script does not support pre-release"
+      info "\nAlpine OS: install xray formal release, alpine install script does not support pre-release"
       ash $GITHUB_XRAY_OFFICIAL_SCRIPT >> $LOG_FILE 2>&1
       rc-update add xray               >> $LOG_FILE 2>&1
       rc-service xray start            >> $LOG_FILE 2>&1
     else
-      log2file "\nInstalling latest xray including pre-release"
+      info "\nInstalling latest xray including pre-release"
       bash $GITHUB_XRAY_OFFICIAL_SCRIPT install  >> "$LOG_FILE" 2>&1
     fi
 
-    echo -e "[${green}OK${none}]" | tee -a "$LOG_FILE"
+    task_done
 
 }
 
@@ -200,28 +219,28 @@ uninstall_in_alpine() {
 
 uninstall_xray() {
 # Check if geodata files exist and are recent (less than 1 week old)
-    echo -n -e "${yellow}什么？要卸载重装？ / Force Reinstall ... ${none}" | tee -a "$LOG_FILE"
+    task_start "什么？要卸载重装？ / Force Reinstall"
     
     if [ "$ID" = "alpine" ] || [ "$ID_LIKE" = "alpine" ]; then
-      log2file "\nAlpine OS: uninstall xray"
+      info "\nAlpine OS: uninstall xray"
       uninstall_in_alpine
     else
       bash $GITHUB_XRAY_OFFICIAL_SCRIPT remove --purge >> "$LOG_FILE" 2>&1
     fi 
 
-    echo -e "[${green}OK${none}]" | tee -a "$LOG_FILE"
+    task_done
 
 }
 
 
 enable_bbr() {
-    echo -n -e "${yellow}最后，打开BBR / Finishing, Enabling BBR ... ${none}" | tee -a "$LOG_FILE"
+    task_start "最后，打开BBR / Finishing, Enabling BBR"
     sed -i '/net.ipv4.tcp_congestion_control/d' /etc/sysctl.conf
     sed -i '/net.core.default_qdisc/d' /etc/sysctl.conf
     echo "net.ipv4.tcp_congestion_control = bbr" >> /etc/sysctl.conf
     echo "net.core.default_qdisc = fq" >> /etc/sysctl.conf
     sysctl -p >> "$LOG_FILE" 2>&1
-    echo -e "[${green}OK${none}]" | tee -a "$LOG_FILE"
+    task_done
 
 }
 
@@ -297,7 +316,7 @@ parse_args() {
         --remove)
           remove_alias
           uninstall_xray
-          echo -e "${yellow}卸载完成 / Uninstallation complete ... ${none}[${green}OK${none}]"
+          info "卸载完成 / Uninstallation complete ... [${green}OK${none}]"
           exit 0
           ;;
         *)
@@ -312,10 +331,9 @@ parse_args() {
 
 
 
-configure_xray() {
 
-    # Set default values if not specified
-    echo -n -e "${yellow}监测IP / Detect IP ... ${none}" | tee -a "$LOG_FILE"
+initialize_variables() {
+    task_start "监测IP / Detect IP"
     if [[ -z $netstack ]]; then
       if [[ -n "$IPv4" ]]; then
         netstack=4
@@ -328,10 +346,9 @@ configure_xray() {
         exit 1
       fi
     fi
-    echo -e "[${green}OK:$ip${none}]" | tee -a  "$LOG_FILE"
+    task_done_with_info "$ip"
 
-    # 端口
-    echo -n -e "${yellow}寻找一个无辜的端口 / Find a Random Unused Port  ... ${none}" | tee -a "$LOG_FILE"
+    task_start "寻找一个无辜的端口 / Find a Random Unused Port"
     if [[ -z $port ]]; then      
       base=$((10000 + RANDOM % 50000))  # Start at a random offset
       for i in $(seq 0 1000); do
@@ -340,70 +357,65 @@ configure_xray() {
           break
         }
       done
-      log2file "\n找到一个空闲随机端口，如果有防火墙需要放行 / Random unused port found, if firewall enabled, add tcp rules for: ${cyan}$port${none}"
+      info "\n找到一个空闲随机端口，如果有防火墙需要放行 / Random unused port found, if firewall enabled, add tcp rules for: ${cyan}$port${none}"
     fi
-    echo -e "[${green}OK:$port${none}]" | tee -a  "$LOG_FILE"
+    task_done_with_info "$port"
 
-    echo -n -e "${yellow}生成一个UUID / Generate UUID  ... ${none}" | tee -a "$LOG_FILE"
-    # Xray UUID
+    if [[ -z $domain ]]; then
+      info "用户没有指定自己的SNI，使用默认 / User did not specify SNI, using default"
+      domain="$DEFAULT_DOMAIN"
+    else
+      info "用户指定了自己的SNI / User specified SNI: ${cyan}${domain}${none}"
+    fi
+}
+
+generate_crypto() {
+    task_start "生成一个UUID / Generate UUID"
     if [[ -z $uuid ]]; then
         uuid=$(generate_uuid)
     fi
-    echo -e "[${green}OK${none}]" | tee -a  "$LOG_FILE"
+    task_done
 
-    # x25519公私钥
-    echo -n -e "${yellow}生成一个密钥 / Generate x25519 keys  ... ${none}" | tee -a "$LOG_FILE"
+    task_start "生成一个密钥 / Generate x25519 keys"
     if [[ -z $private_key ]]; then
-      # Generate keys using xray directly
       keys=$(xray x25519)
       private_key=$(echo "$keys" | awk '/PrivateKey:/ {print $2}')
       public_key=$(echo "$keys" | awk '/Password:/ {print $2}')
-      log2file "\n私钥 (PrivateKey) = ${cyan}${private_key}${none}"
-      log2file "公钥 (PublicKey) = ${cyan}${public_key}${none}" 
+      info "\n私钥 (PrivateKey) = ${cyan}${private_key}${none}"
+      info "公钥 (PublicKey) = ${cyan}${public_key}${none}" 
     fi
-    echo -e "[${green}OK${none}]" | tee -a  "$LOG_FILE"
+    task_done
 
-
-    # ShortID
-    echo -n -e "${yellow}生成一个shortid / Generate shortid  ... ${none}" | tee -a "$LOG_FILE"
+    task_start "生成一个shortid / Generate shortid"
     if [[ -z $shortid ]]; then
       shortid=$(generate_shortid)
-      log2file "\nShortID = ${cyan}${shortid}${none}" 
+      info "\nShortID = ${cyan}${shortid}${none}" 
     fi
-    echo -e "[${green}OK${none}]" | tee -a  "$LOG_FILE"
+    task_done
 
-    # ML-DSA-65
     if [[ $mldsa_enabled == 1 ]]; then
-      echo -n -e "${yellow}生成ML-DSA-65密钥对 / Generate ML-DSA-65 Keys  ... ${none}" | tee -a "$LOG_FILE"
+      task_start "生成ML-DSA-65密钥对 / Generate ML-DSA-65 Keys"
       if [[ -z $mldsa65Seed || -z $mldsa65Verify ]]; then
-        # Generate keys using xray directly
-        log2file "\nmldsa65Seed mldsa65Verify 没有指定，自动生成 / Generating mldsa65keys"
+        info "\nmldsa65Seed mldsa65Verify 没有指定，自动生成 / Generating mldsa65keys"
         mldsa65keys=$(xray mldsa65)
         mldsa65Seed=$(echo "$mldsa65keys" | awk '/Seed:/ {print $2}')
         mldsa65Verify=$(echo "$mldsa65keys" | awk '/Verify:/ {print $2}')
-        log2file "私钥 (PrivateKey) = ${cyan}${mldsa65Seed}${none}"
-        log2file "公钥 (PublicKey) = ${cyan}${mldsa65Verify}${none}"
+        info "私钥 (PrivateKey) = ${cyan}${mldsa65Seed}${none}"
+        info "公钥 (PublicKey) = ${cyan}${mldsa65Verify}${none}"
       fi
-      echo -e "[${green}OK${none}]" | tee -a  "$LOG_FILE"
+      task_done
     else
       mldsa65Seed=""
       mldsa65Verify=""
     fi
+}
 
-    # 目标网站
-    if [[ -z $domain ]]; then
-      log2file "用户没有指定自己的SNI，使用默认 / User did not specify SNI, using default"
-      domain="$DEFAULT_DOMAIN"
-    else
-      log2file "用户指定了自己的SNI / User specified SNI: ${cyan}${domain}${none}"
-    fi
-
-
-    log2file "网络栈netstack = ${cyan}${netstack}${none}" 
-    log2file "本机IP = ${cyan}${ip}${none}"
-    log2file "端口Port = ${cyan}${port}${none}" 
-    log2file "用户UUID = $cyan${uuid}${none}" 
-    log2file "域名SNI = ${cyan}$domain${none}" 
+build_xray_config() {
+    info "网络栈netstack = ${cyan}${netstack}${none}" 
+    info "本机IP = ${cyan}${ip}${none}"
+    info "端口Port = ${cyan}${port}${none}" 
+    info "用户UUID = ${cyan}${uuid}${none}" 
+    info "域名SNI = ${cyan}$domain${none}" 
 
     reality_template=$(cat <<-EOF
       { // VLESS + Reality
@@ -521,16 +533,21 @@ EOF
     if [[ $mldsa_enabled != 1 ]]; then
       reality_template=$(echo "$reality_template" | sed '/"mldsa65Seed":/d')
     fi
-    # 配置config.json
-    echo -n -e "${yellow}快好了，手搓 / Configuring /usr/local/etc/xray/config.json ... ${none}"
-    # TODO: add multiple templates for different protocols
+    task_start "快好了，手搓 / Configuring /usr/local/etc/xray/config.json"
     echo "$reality_template" > /usr/local/etc/xray/config.json
-    
-    echo -e "[${green}OK${none}]" | tee -a "$LOG_FILE"
-    # 重启 Xray
-    echo -n -e "${yellow}冲刺，开启服务 / Starting Service ... ${none}"
-    service xray restart >> "$LOG_FILE" 2>&1
-    echo -e "[${green}OK${none}]" | tee -a  "$LOG_FILE"
+    task_done
+}
+
+restart_xray_service() {
+    task_start "冲刺，开启服务 / Starting Service"
+    service xray restart | tee -a "$LOG_FILE" 2>&1
+    task_done
+}
+configure_xray() {
+    initialize_variables
+    generate_crypto
+    build_xray_config
+    restart_xray_service
 }
 
 
@@ -554,44 +571,12 @@ show_help() {
 }
 
 
-output_results() {
-    # 指纹FingerPrint
-    fingerprint="random"
-    # SpiderX
-    spiderx=""
-
-    log2file "地址 / Address = $cyan${ip}${none}"
-    log2file "端口 / Port = ${cyan}${port}${none}"
-    log2file "用户ID / User ID (UUID) = $cyan${uuid}${none}"
-    log2file "流控 / Flow Control = ${cyan}xtls-rprx-vision${none}"
-    log2file "加密 / Encryption = ${cyan}none${none}"
-    log2file "传输协议 / Network Protocol = ${cyan}tcp${none}"
-    log2file "伪装类型 / Header Type = ${cyan}none${none}"
-    log2file "底层传输安全 / Transport Security = ${cyan}reality${none}"
-    log2file "SNI = ${cyan}${domain}${none}"
-    log2file "指纹 / Fingerprint = ${cyan}${fingerprint}${none}"
-    log2file "公钥 / PublicKey = ${cyan}${public_key}${none}"
-    log2file "ShortId = ${cyan}${shortid}${none}"
-    log2file "SpiderX = ${cyan}${spiderx}${none}"
-    if [[ $mldsa_enabled == 1 ]]; then
-      log2file "mldsa65Seed = ${cyan}${mldsa65Seed}${none}"
-      log2file "mldsa65Verify = ${cyan}${mldsa65Verify}${none}"
-    fi
-
-    if [[ $netstack == "6" ]]; then
-      ip=[$ip]
-    fi
-    
-    vless_reality_url_short="vless://${uuid}@${ip}:${port}?flow=xtls-rprx-vision&encryption=none&type=tcp&security=reality&sni=${domain}&fp=${fingerprint}&pbk=${public_key}&sid=${shortid}#${current_hostname}"
-
-    log2file "${yellow}二维码生成命令: / For QR code, install qrencode and run: ${none}" 
-    log2file "qrencode -t UTF8 -r $URL_FILE" | tee -a "$LOG_FILE"
-
-    echo -e -n "${yellow}检查服务状态 / Checking Service ... ${none}" | tee -a "$LOG_FILE"
+check_service_status() {
+    task_start "检查服务状态 / Checking Service"
 
     if [ "$ID" = "alpine" ] || [ "$ID_LIKE" = "alpine" ]; then
       if rc-service "$SERVICE_NAME_ALPINE" status >> "$LOG_FILE" 2>&1; then 
-          echo -e "[${green}OK${none}]" | tee -a "$LOG_FILE"
+          task_done
       else
         error "[服务未运行 / Service is not active]" 
         service status "$SERVICE_NAME_ALPINE" | tee -a "$LOG_FILE"
@@ -600,7 +585,7 @@ output_results() {
       fi
     else
       if systemctl is-active --quiet "$SERVICE_NAME"; then
-        echo -e "[${green}OK${none}]" | tee -a "$LOG_FILE"
+        task_done
       else
         error "服务未运行 / Service is not active" 
         systemctl status "$SERVICE_NAME" | tee -a "$LOG_FILE"
@@ -608,21 +593,29 @@ output_results() {
         exit 1
       fi
     fi
-    
-    echo -e "${yellow}舒服了 / Done: ${none}" | tee -a "$LOG_FILE"
+}
 
+generate_share_links() {
+    if [[ $netstack == "6" ]]; then
+      ip="[$ip]"
+    fi
+    
+    vless_reality_url_short="vless://${uuid}@${ip}:${port}?flow=xtls-rprx-vision&encryption=none&type=tcp&security=reality&sni=${domain}&fp=${fingerprint}&pbk=${public_key}&sid=${shortid}#${current_hostname}"
+
+    info "Share Link:"
+    
     if [[ $mldsa_enabled == 1 ]]; then
       vless_reality_mldsa_url="vless://${uuid}@${ip}:${port}?flow=xtls-rprx-vision&encryption=none&type=tcp&security=reality&sni=${domain}&fp=${fingerprint}&pbk=${public_key}&sid=${shortid}&pqv=${mldsa65Verify}&spx=${spiderx}&#${current_hostname}"
-      echo -e "${yellow}完整含mldsa65Verify:${none}"   | tee -a "$LOG_FILE"
-      echo -e "${magenta}${vless_reality_mldsa_url}${none}" | tee -a "$LOG_FILE" | tee "$URL_FILE"
-      echo -e "${yellow}简短不含mldsa65Verify:${none}" | tee -a "$LOG_FILE"
-      echo -e "${magenta}${vless_reality_url_short}${none}" | tee -a "$LOG_FILE" | tee "$URL_FILE_SHORT"
+      echo -e "${magenta}${vless_reality_mldsa_url}${none}"  | tee -a "$LOG_FILE" | tee -a "$URL_FILE"
+      info "Without mldsa:"
+      echo -e "${magenta}${vless_reality_url_short}${none}"  | tee -a "$LOG_FILE" | tee -a "$URL_FILE"
     else
-      echo -e "${yellow}分享链接 / Share Link:${none}" | tee -a "$LOG_FILE"
-      echo -e "${magenta}${vless_reality_url_short}${none}" | tee -a "$LOG_FILE" | tee "$URL_FILE"
+      echo -e "${magenta}${vless_reality_url_short}${none}"  | tee -a "$LOG_FILE" | tee -a "$URL_FILE"
       echo "" > "$URL_FILE_SHORT"
     fi
+}
 
+generate_clash_config() {
     local server_ip_for_clash=$ip
     if [[ $netstack == "6" ]]; then
         # for clash meta, ipv6 does not need bracket.
@@ -646,27 +639,63 @@ output_results() {
   uuid: ${uuid}
 EOF
 )
-    echo -e "${yellow}Clash.meta 配置 / Clash.meta config block:${none}" | tee -a "$LOG_FILE" | tee "$URL_FILE"
+    info "Clash.meta 配置 / Clash.meta config block:"
     echo -e "${cyan}${clash_meta_config}${none}" | tee -a "$LOG_FILE" | tee "$URL_FILE"
 }
+
+output_results() {
+    # 指纹FingerPrint
+    fingerprint="random"
+    # SpiderX
+    spiderx=""
+
+    info "地址 / Address = ${cyan}${ip}${none}"
+    info "端口 / Port = ${cyan}${port}${none}"
+    info "用户ID / User ID (UUID) = ${cyan}${uuid}${none}"
+    info "流控 / Flow Control = ${cyan}xtls-rprx-vision${none}"
+    info "加密 / Encryption = ${cyan}none${none}"
+    info "传输协议 / Network Protocol = ${cyan}tcp${none}"
+    info "伪装类型 / Header Type = ${cyan}none${none}"
+    info "底层传输安全 / Transport Security = ${cyan}reality${none}"
+    info "SNI = ${cyan}${domain}${none}"
+    info "指纹 / Fingerprint = ${cyan}${fingerprint}${none}"
+    info "公钥 / PublicKey = ${cyan}${public_key}${none}"
+    info "ShortId = ${cyan}${shortid}${none}"
+    info "SpiderX = ${cyan}${spiderx}${none}"
+    if [[ $mldsa_enabled == 1 ]]; then
+      info "mldsa65Seed = ${cyan}${mldsa65Seed}${none}"
+      info "mldsa65Verify = ${cyan}${mldsa65Verify}${none}"
+    fi
+
+    info "${yellow}二维码生成命令: / For QR code, install qrencode and run: ${none}" 
+    info "qrencode -t UTF8 -r $URL_FILE" | tee -a "$LOG_FILE"
+
+    check_service_status
+    
+    info "舒服了 / Done: "
+    
+    generate_share_links
+    generate_clash_config
+}
+
 
 download_official_script() {
 
     # Download official script
-    echo -n -e "${yellow}下载，官方脚本 / Download Official Script ... ${none}" | tee -a "$LOG_FILE"
+    task_start "下载，官方脚本 / Download Official Script"
 
     local url="$GITHUB_XRAY_OFFICIAL_SCRIPT_URL"
 
     if [ "$ID" = "alpine" ] || [ "$ID_LIKE" = "alpine" ]; then
         url="$GITHUB_XRAY_OFFICIAL_SCRIPT_ALPINE_URL"
-        log2file "\nAlpine OS detected"        
+        info "\nAlpine OS detected"        
     fi    
 
     curl -sL "$url" -o "$GITHUB_XRAY_OFFICIAL_SCRIPT" >> "$LOG_FILE" 2>&1
     if [[ -f "$GITHUB_XRAY_OFFICIAL_SCRIPT" ]]; then
-        echo -e "[${green}OK${none}]" | tee -a "$LOG_FILE"
+        task_done
     else
-        echo -e "[${red}FAILED${none}]" | tee -a "$LOG_FILE"
+        task_fail
         error "无法下载官方脚本，检查互联网链接，详细查看$LOG_FILE"
         exit 1
     fi
@@ -696,9 +725,9 @@ main() {
     enable_bbr
     add_alias_if_missing
     output_results
-    echo -e "${yellow}总用时 / Elapsed Time:${none}  ${cyan}$SECONDS 秒${none}" 
-    echo -e "${yellow}日志文件 / Log File:${none}  ${cyan}$LOG_FILE${none}"
-    echo -e "${yellow}下次可以直接用别名${none}${cyan}nokey${none}${yellow}启动本脚本${none}"
+    info "总用时 / Elapsed Time:  ${cyan}$SECONDS 秒${none}"
+    info "日志文件 / Log File:  ${cyan}$LOG_FILE${none}"
+    info "下次可以直接用别名${cyan}nokey${none}启动本脚本"
     echo -e "---------- ${cyan}live free or die hard${none} -------------" | tee -a "$LOG_FILE"
 }
 

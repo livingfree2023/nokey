@@ -2,7 +2,7 @@
 
 # Constants and Configuration
 
-readonly SCRIPT_VERSION="2.6" 
+readonly SCRIPT_VERSION="2.7" 
 readonly LOG_FILE="nokey.log"
 readonly URL_FILE="nokey.url"
 #readonly DEFAULT_PORT=443
@@ -763,6 +763,7 @@ main() {
     fi
 
     show_banner
+    echo -e "当前版本 / Version: ${cyan}${SCRIPT_VERSION}${none} " | tee -a "$LOG_FILE"
     install_dependencies # the next function needs curl, in debian 9 curl is not shipped
     download_official_script
     detect_network_interfaces

@@ -1,3 +1,4 @@
 *.log
 *.url
 install-release.sh
+*.bak

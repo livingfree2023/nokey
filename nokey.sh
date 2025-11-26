@@ -2,7 +2,7 @@
 
 # Constants and Configuration
 
-readonly SCRIPT_VERSION="20250726" 
+readonly SCRIPT_VERSION="20251126" 
 readonly LOG_FILE="nokey.log"
 readonly URL_FILE="nokey.url"
 readonly URL_FILE_SHORT="nokey_short.url"

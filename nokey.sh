@@ -2,7 +2,7 @@
 
 # Constants and Configuration
 
-readonly SCRIPT_VERSION="2.4" 
+readonly SCRIPT_VERSION="2.5" 
 readonly LOG_FILE="nokey.log"
 readonly URL_FILE="nokey.url"
 #readonly DEFAULT_PORT=443
@@ -91,9 +91,6 @@ add_alias_if_missing() {
       if [ -f "$file" ]; then
           if ! grep -Fxq "$alias_line" "$file"; then
               echo "$alias_line" >> "$file"
-              # info "\nAdded alias to $file"
-          else
-              # info "Alias already present in $file"
           fi
       fi
     done

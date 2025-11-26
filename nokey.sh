@@ -2,7 +2,7 @@
 
 # Constants and Configuration
 
-readonly SCRIPT_VERSION="2.5" 
+readonly SCRIPT_VERSION="2.6" 
 readonly LOG_FILE="nokey.log"
 readonly URL_FILE="nokey.url"
 #readonly DEFAULT_PORT=443
@@ -382,7 +382,7 @@ initialize_variables() {
     task_done_with_info "$port"
 
     if [[ -z $domain ]]; then
-      info "用户没有指定自己的SNI，使用默认 / User did not specify SNI, using default"
+      # info "用户没有指定自己的SNI，使用默认 / User did not specify SNI, using default"
       domain="$DEFAULT_DOMAIN"
     else
       info "用户指定了自己的SNI / User specified SNI: ${cyan}${domain}${none}"
@@ -660,7 +660,6 @@ generate_share_links() {
       echo -e "${magenta}${vless_reality_url_short}${none}"  | tee -a "$LOG_FILE" | tee -a "$URL_FILE"
     else
       echo -e "${magenta}${vless_reality_url_short}${none}"  | tee -a "$LOG_FILE" | tee -a "$URL_FILE"
-      echo "" > "$URL_FILE_SHORT"
     fi
 }
 
@@ -716,8 +715,7 @@ output_results() {
     #   info "mldsa65Verify = ${cyan}${mldsa65Verify}${none}"
     # fi
 
-    info "${yellow}二维码生成命令: / For QR code, install qrencode and run: ${none}" 
-    info "qrencode -t UTF8 -r $URL_FILE" | tee -a "$LOG_FILE"
+    info "${yellow}二维码生成命令: / For QR code, install qrencode and run: ${none} qrencode -t UTF8 -r $URL_FILE" | tee -a "$LOG_FILE"
 
     check_service_status
     
@@ -774,9 +772,9 @@ main() {
     enable_bbr
     add_alias_if_missing
     output_results
-    info "总用时 / Elapsed Time:  ${cyan}$SECONDS 秒${none}"
-    info "日志文件 / Log File:  ${cyan}$LOG_FILE${none}"
-    info "下次可以直接用别名${cyan}nokey${none}启动本脚本"
+    info "总用时 / Elapsed Time:  ${green}$SECONDS 秒${none}"
+    # info "日志文件 / Log File:  ${green}$LOG_FILE${none}"
+    info "下次可以直接用别名${cyan}nokey${none}启动本脚本最新版"
     echo -e "---------- ${cyan}live free or die hard${none} -------------" | tee -a "$LOG_FILE"
 }
 

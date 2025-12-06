@@ -489,7 +489,9 @@ build_xray_config() {
           {
             "protocol": "freedom",
             "settings": {
-                  "domainStrategy": "UseIPv4" or "UseIPv6"
+                  // uncomment only one line to force ipv6/ipv4 
+                  // "domainStrategy": "UseIPv4"  
+                  // "domainStrategy": "UseIPv6"
               },
             "tag": "direct"
           },

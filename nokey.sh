@@ -2,7 +2,7 @@
 
 # Constants and Configuration
 
-readonly SCRIPT_VERSION="2.7" 
+readonly SCRIPT_VERSION="2025.12.06" 
 readonly LOG_FILE="nokey.log"
 readonly URL_FILE="nokey.url"
 readonly DEFAULT_DOMAIN="www.apple.com"
@@ -639,19 +639,19 @@ generate_clash_config() {
     fi
 
     clash_meta_config=$(cat <<-EOF
-- name: ${current_hostname}
-  type: vless
-  server: ${server_ip_for_clash}
-  port: ${port}
-  client-fingerprint: ${fingerprint}
-  tls: true
-  servername: ${domain}
-  flow: xtls-rprx-vision
-  network: tcp
-  reality-opts:
-    public-key: ${public_key}
-    short-id: ${shortid}
-  uuid: ${uuid}
+  - name: ${current_hostname}
+    type: vless
+    server: ${server_ip_for_clash}
+    port: ${port}
+    client-fingerprint: ${fingerprint}
+    tls: true
+    servername: ${domain}
+    flow: xtls-rprx-vision
+    network: tcp
+    reality-opts:
+      public-key: ${public_key}
+      short-id: ${shortid}
+    uuid: ${uuid}
 EOF
 )
     info "Clash.meta 配置 / Clash.meta config block:"

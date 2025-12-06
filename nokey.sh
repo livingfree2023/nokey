@@ -449,7 +449,7 @@ build_xray_config() {
     # info "域名SNI = ${cyan}$domain${none}" 
 
     reality_template=$(cat <<-EOF
-      { // VLESS + Reality
+      { 
         "log": {
           "access": "/var/log/xray/access.log",
           "error": "/var/log/xray/error.log",
@@ -492,21 +492,10 @@ build_xray_config() {
         "outbounds": [
           {
             "protocol": "freedom",
+            "settings": {
+                  "domainStrategy": "UseIPv4" or "UseIPv6"
+              },
             "tag": "direct"
-          },
-          {
-              "protocol": "freedom",
-              "settings": {
-                  "domainStrategy": "UseIPv4"
-              },
-              "tag": "force-ipv4"
-          },
-          {
-              "protocol": "freedom",
-              "settings": {
-                  "domainStrategy": "UseIPv6"
-              },
-              "tag": "force-ipv6"
           },
           {
             "protocol": "blackhole",
@@ -529,6 +518,13 @@ build_xray_config() {
               "type": "field",
               "ip": ["geoip:private"],
               "outboundTag": "block"
+            },
+            {
+              "type": "field",
+              "outboundTag": "block",
+              "protocol": [
+                "bittorrent"
+              ]
             }
           ]
         }

@@ -5,7 +5,6 @@
 readonly SCRIPT_VERSION="2.7" 
 readonly LOG_FILE="nokey.log"
 readonly URL_FILE="nokey.url"
-#readonly DEFAULT_PORT=443
 readonly DEFAULT_DOMAIN="www.apple.com"
 readonly GITHUB_URL="https://github.com/livingfree2023/xray-vless-reality-nokey"
 readonly GITHUB_CMD="bash <(curl -sL https://raw.githubusercontent.com/livingfree2023/xray-vless-reality-livefree/refs/heads/main/nokey.sh)"
@@ -30,6 +29,7 @@ readonly none='\e[0m'
 
 # Initialize info file
 echo > "$LOG_FILE"
+echo > "$URL_FILE"
 
 # Helper functions
 error() {
@@ -73,8 +73,8 @@ check_root() {
 
 
 # Define the alias line
-alias_line="alias nokey='bash -c \"\$(curl -sL https://raw.githubusercontent.com/livingfree2023/xray-vless-reality-nokey/refs/heads/main/nokey.sh)\" @'"
-
+#alias_line="alias nokey='bash -c \"\$(curl -sL https://raw.githubusercontent.com/livingfree2023/xray-vless-reality-nokey/refs/heads/main/nokey.sh)\" @'"
+alias_line="alias nokey=$GITHUB_CMD"
 # Array of potential shell config files
 config_files=(
     "$HOME/.bashrc"
@@ -140,8 +140,6 @@ install_dependencies() {
 
     #todo: "qrencode" should be a flag controlled feature
     local tools=("curl")
-    local missing_tools=()
-    local install_packages=()
 
     declare -A os_package_command=(
         [apt]="apt install -y"
@@ -300,7 +298,6 @@ parse_args() {
             *)
               error "错误: 无效的网络协议栈值 / Error: Invalid netstack value"
               show_help
-              exit 1
               ;;
           esac
           ;;
@@ -334,7 +331,6 @@ parse_args() {
         *)
           error "Unknown option / 什么鬼参数: $arg"
           show_help
-          exit 1
           ;;
       esac
     done
@@ -548,10 +544,11 @@ EOF
         fi
     fi
     
-    echo "$reality_template" > "$config_path"
-    if [[ $? -ne 0 ]]; then
+    if ! echo "$reality_template" > "$config_path"; then
         task_fail
         error "Failed to write xray config to $config_path."
+        [[ -f "$config_path" ]] && rm -f "$config_path"
+        error "Partial config file removed. Check permissions, disk space, and $LOG_FILE for details."
         exit 1
     fi
     task_done
@@ -624,7 +621,7 @@ generate_share_links() {
     info "Share Link:"
     
     if [[ $mldsa_enabled == 1 ]]; then
-      vless_reality_mldsa_url="vless://${uuid}@${ip}:${port}?flow=xtls-rprx-vision&encryption=none&type=tcp&security=reality&sni=${domain}&fp=${fingerprint}&pbk=${public_key}&sid=${shortid}&pqv=${mldsa65Verify}&spx=${spiderx}&#${current_hostname}"
+      vless_reality_mldsa_url="vless://${uuid}@${ip}:${port}?flow=xtls-rprx-vision&encryption=none&type=tcp&security=reality&sni=${domain}&fp=${fingerprint}&pbk=${public_key}&sid=${shortid}&pqv=${mldsa65Verify}&#${current_hostname}"
       echo -e "${magenta}${vless_reality_mldsa_url}${none}"  | tee -a "$LOG_FILE" | tee -a "$URL_FILE"
       info "Without mldsa:"
       echo -e "${magenta}${vless_reality_url_short}${none}"  | tee -a "$LOG_FILE" | tee -a "$URL_FILE"
@@ -658,14 +655,13 @@ generate_clash_config() {
 EOF
 )
     info "Clash.meta 配置 / Clash.meta config block:"
-    echo -e "${cyan}${clash_meta_config}${none}" | tee -a "$LOG_FILE" | tee "$URL_FILE"
+    echo -e "${cyan}${clash_meta_config}${none}" | tee -a "$LOG_FILE" | tee -a "$URL_FILE"
 }
 
 output_results() {
     # 指纹FingerPrint
     fingerprint="random"
-    # SpiderX
-    spiderx=""
+
 
     # info "地址 / Address = ${cyan}${ip}${none}"
     # info "端口 / Port = ${cyan}${port}${none}"

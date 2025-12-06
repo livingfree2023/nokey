@@ -74,7 +74,7 @@ check_root() {
 
 # Define the alias line
 #alias_line="alias nokey='bash -c \"\$(curl -sL https://raw.githubusercontent.com/livingfree2023/xray-vless-reality-nokey/refs/heads/main/nokey.sh)\" @'"
-alias_line="alias nokey=$GITHUB_CMD"
+alias_line="alias nokey=\"$GITHUB_CMD\""
 # Array of potential shell config files
 config_files=(
     "$HOME/.bashrc"

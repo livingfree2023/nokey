@@ -509,16 +509,6 @@ build_xray_config() {
               "tag": "force-ipv6"
           },
           {
-              "protocol": "socks",
-              "settings": {
-                  "servers": [{
-                      "address": "127.0.0.1",
-                      "port": 40000 //warp socks5 port
-                  }]
-              },
-              "tag": "socks5-warp"
-          },
-          {
             "protocol": "blackhole",
             "tag": "block"
           }
@@ -535,22 +525,6 @@ build_xray_config() {
         "routing": {
           "domainStrategy": "IPIfNonMatch",
           "rules": [
-      //      [routing-rule]
-      //      {
-      //        "type": "field",
-      //        "domain": ["geosite:google", "geosite:openai"],  // ***
-      //        "outboundTag": "socks5-warp"  // force-ipv6 // force-ipv4 // socks5-warp
-      //      },
-            {
-              "type": "field",
-              "domain": ["geosite:cn"],  // ***
-              "outboundTag": "blocked"  // force-ipv6 // force-ipv4 // socks5-warp // blocked
-            },
-            {
-              "type": "field",
-              "ip": ["geoip:cn"],  // ***
-              "outboundTag": "blocked"  // force-ipv6 // force-ipv4 // socks5-warp // blocked
-            },
             {
               "type": "field",
               "ip": ["geoip:private"],

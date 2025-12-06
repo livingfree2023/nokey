@@ -201,8 +201,8 @@ install_xray() {
           error "Xray installation failed."
           exit 1
       fi
-      rc-update add xray               >> $LOG_FILE 2>&1
-      rc-service xray start            >> $LOG_FILE 2>&1
+      rc-update add "$SERVICE_NAME_ALPINE"               >> $LOG_FILE 2>&1
+      rc-service "$SERVICE_NAME_ALPINE" start            >> $LOG_FILE 2>&1
     else
       # info "\nInstalling latest xray including pre-release"
       bash $GITHUB_XRAY_OFFICIAL_SCRIPT install  >> "$LOG_FILE" 2>&1
@@ -218,13 +218,13 @@ install_xray() {
 }
 
 uninstall_in_alpine() {
-  rc-service xray stop        >> $LOG_FILE 2>&1
-  rc-update del xray          >> $LOG_FILE 2>&1
+  rc-service "$SERVICE_NAME_ALPINE" stop        >> $LOG_FILE 2>&1
+  rc-update del "$SERVICE_NAME_ALPINE"          >> $LOG_FILE 2>&1
   rm -rf "/usr/local/bin/xray"    >> $LOG_FILE 2>&1
   rm -rf "/usr/local/share/xray"  >> $LOG_FILE 2>&1
   rm -rf "/usr/local/etc/xray/"   >> $LOG_FILE 2>&1
   rm -rf "/var/log/xray/"         >> $LOG_FILE 2>&1
-  rm -rf "/etc/init.d/xray"       >> $LOG_FILE 2>&1
+  rm -rf "/etc/init.d/$SERVICE_NAME_ALPINE"       >> $LOG_FILE 2>&1
 }
 
 uninstall_xray() {
@@ -556,7 +556,16 @@ EOF
 
 restart_xray_service() {
     task_start "冲刺，开启服务 / Starting Service"
-    service xray restart  >> "$LOG_FILE" 2>&1
+    if [ "$ID" = "alpine" ] || [ "$ID_LIKE" = "alpine" ]; then
+        rc-service "$SERVICE_NAME_ALPINE" restart >> "$LOG_FILE" 2>&1
+    else
+        systemctl restart "$SERVICE_NAME" >> "$LOG_FILE" 2>&1
+    fi
+    if [[ $? -ne 0 ]]; then
+        task_fail
+        error "Failed to restart xray service. Check $LOG_FILE for details."
+        exit 1
+    fi
     task_done
 }
 configure_xray() {

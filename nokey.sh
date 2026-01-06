@@ -2,10 +2,10 @@
 
 # Constants and Configuration
 
-readonly SCRIPT_VERSION="2025.12.06" 
+readonly SCRIPT_VERSION="2026.2" 
 readonly LOG_FILE="nokey.log"
 readonly URL_FILE="nokey.url"
-readonly DEFAULT_DOMAIN="www.apple.com"
+readonly DEFAULT_DOMAIN="itunes.apple.com"
 readonly GITHUB_URL="https://github.com/livingfree2023/xray-vless-reality-nokey"
 readonly GITHUB_CMD="bash <(curl -sL https://raw.githubusercontent.com/livingfree2023/xray-vless-reality-livefree/refs/heads/main/nokey.sh)"
 readonly SERVICE_NAME="xray.service"

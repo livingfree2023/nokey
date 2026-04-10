@@ -368,7 +368,7 @@ install_dependencies() {
     task_start "开始准备工作 / Starting Preparation"
 
     #todo: "qrencode" should be a flag controlled feature
-    local tools=("curl" "netstat")
+    local tools=("curl" "netstat" "lsof")
 
     declare -A os_package_command=(
         [apt]="apt install -y"
@@ -407,6 +407,9 @@ install_dependencies() {
             case "$tool" in
                 netstat)
                     package_name="net-tools"
+                    ;;
+                lsof)
+                    package_name="lsof"
                     ;;
             esac
             eval "$install_cmd" "$package_name"  >> "$LOG_FILE" 2>&1

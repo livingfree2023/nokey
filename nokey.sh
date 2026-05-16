@@ -2,10 +2,10 @@
 
 # Constants and Configuration
 
-readonly SCRIPT_VERSION="2026.4.10" 
+readonly SCRIPT_VERSION="2026.6" 
 readonly LOG_FILE="nokey.log"
 readonly URL_FILE="nokey.url"
-readonly DEFAULT_DOMAIN="itunes.apple.com"
+readonly DEFAULT_DOMAIN="www.amd.com"
 readonly GITHUB_URL="https://github.com/livingfree2023/nokey"
 readonly GITHUB_CMD="bash <(curl -sL https://raw.githubusercontent.com/livingfree2023/nokey/refs/heads/main/nokey.sh)"
 readonly SERVICE_NAME="xray.service"
@@ -839,7 +839,7 @@ show_help() {
   echo "选项: / Options"
   echo "  --netstack=4|6     使用IPv4或IPv6 (默认: 自动检测) / Use IPv4 or IPv6"
   echo "  --port=NUMBER      设置端口号 (默认: 随机) / Set port number"
-  echo "  --domain=DOMAIN    设置SNI域名 (默认: itunes.apple.com) / Set SNI domain"
+  echo "  --domain=DOMAIN    设置SNI域名 (默认: www.amd.com) / Set SNI domain"
   echo "  --uuid=STRING      设置UUID (默认: 自动生成) / Set UUID"
   echo "  --mldsa            启用ML-DSA签名生成 (默认: 关闭) / Enable ML-DSA signature generation (default: off)"
   echo "  --mldsa65Seed=STRING  设置ML-DSA-65私钥 (默认: 自动生成) / Set ML-DSA-65 private key"

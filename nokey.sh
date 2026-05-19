@@ -12,7 +12,7 @@ readonly SERVICE_NAME="xray.service"
 readonly SERVICE_NAME_ALPINE="xray"
 
 readonly GITHUB_XRAY_OFFICIAL_SCRIPT_URL="https://raw.githubusercontent.com/XTLS/Xray-install/main/install-release.sh"
-readonly GITHUB_XRAY_OFFICIAL_SCRIPT_ALPINE_URL="https://github.com/XTLS/Xray-install/raw/main/alpinelinux/install-release.sh"
+readonly GITHUB_XRAY_OFFICIAL_SCRIPT_ALPINE_URL="https://raw.githubusercontent.com/livingfree2023/nokey/refs/heads/main/alpine-install-release.sh"
 readonly GITHUB_XRAY_OFFICIAL_SCRIPT="install-release.sh"
 
 mldsa_enabled=0

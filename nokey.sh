@@ -2,7 +2,7 @@
 
 # Constants and Configuration
 
-readonly SCRIPT_VERSION="2026.9" 
+readonly SCRIPT_VERSION="2026.10" 
 readonly LOG_FILE="nokey.log"
 readonly URL_FILE="nokey.url"
 readonly DEFAULT_DOMAIN="www.amd.com"
@@ -12,7 +12,7 @@ readonly SERVICE_NAME="xray.service"
 readonly SERVICE_NAME_ALPINE="xray"
 
 readonly GITHUB_XRAY_OFFICIAL_SCRIPT_URL="https://raw.githubusercontent.com/XTLS/Xray-install/main/install-release.sh"
-readonly GITHUB_XRAY_OFFICIAL_SCRIPT_ALPINE_URL="https://github.com/livingfree2023/Xray-install/raw/refs/heads/main/alpinelinux/install-release.sh"
+readonly GITHUB_XRAY_OFFICIAL_SCRIPT_ALPINE_URL="https://raw.githubusercontent.com/livingfree2023/Xray-install/refs/heads/main/alpinelinux/install-release.sh"
 readonly GITHUB_XRAY_OFFICIAL_SCRIPT="install-release.sh"
 
 mldsa_enabled=0
@@ -1025,11 +1025,13 @@ download_official_script() {
     local url="$GITHUB_XRAY_OFFICIAL_SCRIPT_URL"
 
     if [ "$ID" = "alpine" ] || [ "$ID_LIKE" = "alpine" ]; then
-        url="$GITHUB_XRAY_OFFICIAL_SCRIPT_ALPINE_URL"
+        # Add cache-busting query to reduce stale CDN/script fetches in repeated rapid tests.
+        url="${GITHUB_XRAY_OFFICIAL_SCRIPT_ALPINE_URL}?t=$(date +%s)"
         info "\nAlpine OS detected"        
     fi    
 
-    if curl -fsSL "$url" -o "$GITHUB_XRAY_OFFICIAL_SCRIPT" >> "$LOG_FILE" 2>&1 && [[ -s "$GITHUB_XRAY_OFFICIAL_SCRIPT" ]]; then
+    rm -f "$GITHUB_XRAY_OFFICIAL_SCRIPT"
+    if curl -fSL -H 'Cache-Control: no-cache' -H 'Pragma: no-cache' "$url" -o "$GITHUB_XRAY_OFFICIAL_SCRIPT" >> "$LOG_FILE" 2>&1 && [[ -s "$GITHUB_XRAY_OFFICIAL_SCRIPT" ]]; then
         task_done
     else
         task_fail

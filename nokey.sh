@@ -2,7 +2,7 @@
 
 # Constants and Configuration
 
-readonly SCRIPT_VERSION="2026.8" 
+readonly SCRIPT_VERSION="2026.9" 
 readonly LOG_FILE="nokey.log"
 readonly URL_FILE="nokey.url"
 readonly DEFAULT_DOMAIN="www.amd.com"
@@ -371,7 +371,38 @@ generate_shortid() {
 
 extract_public_key_from_x25519_output() {
     local x25519_output="$1"
-    echo "$x25519_output" | awk -F': ' '/PublicKey:/ {print $2; exit}'
+    # Support multiple xray output formats, e.g.:
+    # - PublicKey: <value>
+    # - Public key: <value>
+    echo "$x25519_output" | sed -E 's/\x1B\[[0-9;]*[A-Za-z]//g' | awk '
+        {
+            line = $0
+            lower = tolower(line)
+            if (lower ~ /public[[:space:]]*key/) {
+                sub(/^[^:]*:[[:space:]]*/, "", line)
+                print line
+                exit
+            }
+        }
+    '
+}
+
+extract_private_key_from_x25519_output() {
+    local x25519_output="$1"
+    # Support multiple xray output formats, e.g.:
+    # - PrivateKey: <value>
+    # - Private key: <value>
+    echo "$x25519_output" | sed -E 's/\x1B\[[0-9;]*[A-Za-z]//g' | awk '
+        {
+            line = $0
+            lower = tolower(line)
+            if (lower ~ /private[[:space:]]*key/) {
+                sub(/^[^:]*:[[:space:]]*/, "", line)
+                print line
+                exit
+            }
+        }
+    '
 }
 
 install_dependencies() {
@@ -673,7 +704,12 @@ generate_crypto() {
         exit 1
       fi
       task_start "生成一个私钥 / Generate Private Key"
-      private_key=$(echo "$keys" | awk '/PrivateKey:/ {print $2}')
+      private_key=$(extract_private_key_from_x25519_output "$keys")
+      if [[ -z "$private_key" ]]; then
+        task_fail
+        error "Failed to parse PrivateKey from x25519 output."
+        exit 1
+      fi
       task_done_with_info "${private_key}"
       task_start "生成一个公钥 / Generate Public Key"
       public_key=$(extract_public_key_from_x25519_output "$keys")

@@ -41,4 +41,12 @@ extracted="$(extract_public_key_from_x25519_output "$keys_sample")"
 [[ "$extracted" == "PUBLIC_VALUE" ]] || fail "public key extraction should return PUBLIC_VALUE"
 pass "public key extraction"
 
+# Test 4: key extraction supports spaced labels used by some xray builds
+keys_sample_spaced=$'Private key: PRIVATE_SPACED\nPublic key: PUBLIC_SPACED'
+extracted_private="$(extract_private_key_from_x25519_output "$keys_sample_spaced")"
+extracted_public="$(extract_public_key_from_x25519_output "$keys_sample_spaced")"
+[[ "$extracted_private" == "PRIVATE_SPACED" ]] || fail "private key extraction should support 'Private key:' format"
+[[ "$extracted_public" == "PUBLIC_SPACED" ]] || fail "public key extraction should support 'Public key:' format"
+pass "spaced label key extraction"
+
 echo "All tests passed."

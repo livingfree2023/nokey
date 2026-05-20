@@ -2,7 +2,7 @@
 
 # Constants and Configuration
 
-readonly SCRIPT_VERSION="2026.6" 
+readonly SCRIPT_VERSION="2026.7" 
 readonly LOG_FILE="nokey.log"
 readonly URL_FILE="nokey.url"
 readonly DEFAULT_DOMAIN="www.amd.com"
@@ -12,7 +12,7 @@ readonly SERVICE_NAME="xray.service"
 readonly SERVICE_NAME_ALPINE="xray"
 
 readonly GITHUB_XRAY_OFFICIAL_SCRIPT_URL="https://raw.githubusercontent.com/XTLS/Xray-install/main/install-release.sh"
-readonly GITHUB_XRAY_OFFICIAL_SCRIPT_ALPINE_URL="https://raw.githubusercontent.com/livingfree2023/nokey/refs/heads/main/alpine-install-release.sh"
+readonly GITHUB_XRAY_OFFICIAL_SCRIPT_ALPINE_URL="https://github.com/livingfree2023/Xray-install/raw/refs/heads/main/alpinelinux/install-release.sh"
 readonly GITHUB_XRAY_OFFICIAL_SCRIPT="install-release.sh"
 
 mldsa_enabled=0
@@ -369,6 +369,11 @@ generate_shortid() {
     head -c 8 /dev/urandom | od -An -tx1 | tr -d ' \n'
 }
 
+extract_public_key_from_x25519_output() {
+    local x25519_output="$1"
+    echo "$x25519_output" | awk -F': ' '/PublicKey:/ {print $2; exit}'
+}
+
 install_dependencies() {
 
     task_start "开始准备工作 / Starting Preparation"
@@ -534,11 +539,9 @@ parse_args() {
           case "${arg#*=}" in
             4)
               netstack=4
-              ip=${IPv4}
               ;;
             6)
               netstack=6
-              ip=${IPv6}
               ;;
             *)
               error "错误: 无效的网络协议栈值 / Error: Invalid netstack value"
@@ -597,16 +600,31 @@ initialize_variables() {
 
     task_start "监测IP / Detect IP"
     if [[ -z $netstack ]]; then
-      if [[ -n "$IPv4" ]]; then
-        netstack=4
+        if [[ -n "$IPv4" ]]; then
+            netstack=4
+        elif [[ -n "$IPv6" ]]; then
+            netstack=6
+        else
+            error "没有获取到公共IP / No public IP detected"
+            exit 1
+        fi
+    fi
+
+    if [[ "$netstack" == "4" ]]; then
+        if [[ -z "$IPv4" ]]; then
+            error "用户指定IPv4，但未检测到IPv4公网地址 / netstack=4 selected but no public IPv4 detected"
+            exit 1
+        fi
         ip=${IPv4}
-      elif [[ -n "$IPv6" ]]; then
-        netstack=6
+    elif [[ "$netstack" == "6" ]]; then
+        if [[ -z "$IPv6" ]]; then
+            error "用户指定IPv6，但未检测到IPv6公网地址 / netstack=6 selected but no public IPv6 detected"
+            exit 1
+        fi
         ip=${IPv6}
-      else
-        error "没有获取到公共IP / No public IP detected"
+    else
+        error "错误: 无效的网络协议栈值 / Error: Invalid netstack value"
         exit 1
-      fi
     fi
     task_done_with_info "$ip"
 
@@ -658,7 +676,12 @@ generate_crypto() {
       private_key=$(echo "$keys" | awk '/PrivateKey:/ {print $2}')
       task_done_with_info "${private_key}"
       task_start "生成一个公钥 / Generate Public Key"
-      public_key=$(echo "$keys" | awk -F': ' '/Password.*PublicKey/ || /Password:/ {print $2}')
+      public_key=$(extract_public_key_from_x25519_output "$keys")
+      if [[ -z "$public_key" ]]; then
+        task_fail
+        error "Failed to parse PublicKey from x25519 output."
+        exit 1
+      fi
       task_done_with_info "${public_key}"
     fi
 
@@ -1013,6 +1036,7 @@ main() {
     echo -e "---------- ${cyan}live free or die hard${none} -------------" | tee -a "$LOG_FILE"
 }
 
-main "$@"
-
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    main "$@"
+fi
 

@@ -2,7 +2,7 @@
 
 # Constants and Configuration
 
-readonly SCRIPT_VERSION="2026.13" 
+readonly SCRIPT_VERSION="2026.14" 
 readonly LOG_FILE="nokey.log"
 readonly URL_FILE="nokey.url"
 readonly DEFAULT_DOMAIN="www.amd.com"
@@ -769,6 +769,13 @@ install_xray() {
 
     task_start "开始，安装或升级XRAY / Install or upgrade XRAY"
 
+    # 如果xray已在运行，先停掉，否则二进制文件被锁无法覆写
+    if [ "$ID" = "alpine" ] || [ "$ID_LIKE" = "alpine" ]; then
+        rc-service "$SERVICE_NAME_ALPINE" stop 2>/dev/null || true
+    else
+        systemctl stop "$SERVICE_NAME" 2>/dev/null || true
+    fi
+
     local arch_binary_name=""
     local arch_name=""
     arch_binary_name="$(resolve_arch_binary_name)" || { task_fail; error "不支持的架构: $(uname -m)，仅支持amd64和arm64 / Unsupported architecture: $(uname -m). Only amd64 and arm64 are supported."; exit 1; }
@@ -782,11 +789,11 @@ install_xray() {
     log_verbose "Created install directories under /usr/local and /var/log/xray"
 
     log_verbose "Downloading: ${GITHUB_RELEASE_BASE_URL}/${arch_binary_name} -> /usr/local/bin/xray"
-    curl -fSL "${GITHUB_RELEASE_BASE_URL}/${arch_binary_name}" -o /usr/local/bin/xray >> "$LOG_FILE" 2>&1 || { task_fail; error "下载${arch_binary_name}失败 / Failed to download ${arch_binary_name}"; exit 1; }
+    curl -fSL --retry 3 --retry-delay 5 "${GITHUB_RELEASE_BASE_URL}/${arch_binary_name}" -o /usr/local/bin/xray >> "$LOG_FILE" 2>&1 || { task_fail; error "下载${arch_binary_name}失败 / Failed to download ${arch_binary_name}"; exit 1; }
     log_verbose "Downloading: ${GITHUB_RELEASE_BASE_URL}/geoip.dat -> /usr/local/share/xray/geoip.dat"
-    curl -fSL "${GITHUB_RELEASE_BASE_URL}/geoip.dat" -o /usr/local/share/xray/geoip.dat >> "$LOG_FILE" 2>&1 || { task_fail; error "下载geoip.dat失败 / Failed to download geoip.dat"; exit 1; }
+    curl -fSL --retry 3 --retry-delay 5 "${GITHUB_RELEASE_BASE_URL}/geoip.dat" -o /usr/local/share/xray/geoip.dat >> "$LOG_FILE" 2>&1 || { task_fail; error "下载geoip.dat失败 / Failed to download geoip.dat"; exit 1; }
     log_verbose "Downloading: ${GITHUB_RELEASE_BASE_URL}/geosite.dat -> /usr/local/share/xray/geosite.dat"
-    curl -fSL "${GITHUB_RELEASE_BASE_URL}/geosite.dat" -o /usr/local/share/xray/geosite.dat >> "$LOG_FILE" 2>&1 || { task_fail; error "下载geosite.dat失败 / Failed to download geosite.dat"; exit 1; }
+    curl -fSL --retry 3 --retry-delay 5 "${GITHUB_RELEASE_BASE_URL}/geosite.dat" -o /usr/local/share/xray/geosite.dat >> "$LOG_FILE" 2>&1 || { task_fail; error "下载geosite.dat失败 / Failed to download geosite.dat"; exit 1; }
     chmod 755 /usr/local/bin/xray
     log_verbose "Set executable permissions on /usr/local/bin/xray"
 
@@ -1618,6 +1625,13 @@ install_realm() {
 
     task_start "安装 Realm / Install Realm"
 
+    # 如果realm已在运行，先停掉，否则二进制文件被锁无法覆写
+    if [ "$ID" = "alpine" ] || [ "$ID_LIKE" = "alpine" ]; then
+        rc-service "$REALM_SERVICE_NAME_ALPINE" stop 2>/dev/null || true
+    else
+        systemctl stop "$REALM_SERVICE_NAME" 2>/dev/null || true
+    fi
+
     local arch_binary_name=""
     local arch_name=""
     arch_binary_name="$(resolve_realm_arch_name)" || { task_fail; error "不支持的架构: $(uname -m)，仅支持amd64和arm64 / Unsupported architecture: $(uname -m). Only amd64 and arm64 are supported."; exit 1; }
@@ -1628,7 +1642,7 @@ install_realm() {
     mkdir -p /usr/local/bin "$REALM_CONFIG_DIR" || { task_fail; error "创建Realm目录失败 / Failed to create realm directories"; exit 1; }
 
     log_verbose "Downloading: ${GITHUB_RELEASE_BASE_URL}/${arch_binary_name} -> /usr/local/bin/realm"
-    curl -fSL "${GITHUB_RELEASE_BASE_URL}/${arch_binary_name}" -o /usr/local/bin/realm >> "$LOG_FILE" 2>&1 || { task_fail; error "下载${arch_binary_name}失败 / Failed to download ${arch_binary_name}"; exit 1; }
+    curl -fSL --retry 3 --retry-delay 5 "${GITHUB_RELEASE_BASE_URL}/${arch_binary_name}" -o /usr/local/bin/realm >> "$LOG_FILE" 2>&1 || { task_fail; error "下载${arch_binary_name}失败 / Failed to download ${arch_binary_name}"; exit 1; }
     chmod 755 /usr/local/bin/realm
 
     local realm_rc_tmp

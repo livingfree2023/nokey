@@ -2,7 +2,7 @@
 
 # Constants and Configuration
 
-readonly SCRIPT_VERSION="2026.11" 
+readonly SCRIPT_VERSION="2026.12" 
 readonly LOG_FILE="nokey.log"
 readonly URL_FILE="nokey.url"
 readonly DEFAULT_DOMAIN="www.amd.com"
@@ -185,74 +185,6 @@ resolve_realm_arch_name() {
     esac
 }
 
-sha256_file() {
-    local file_path="$1"
-    if [[ ! -f "$file_path" ]]; then
-        return 1
-    fi
-
-    if command -v sha256sum >/dev/null 2>&1; then
-        sha256sum "$file_path" | awk '{print $1}'
-        return 0
-    fi
-    if command -v shasum >/dev/null 2>&1; then
-        shasum -a 256 "$file_path" | awk '{print $1}'
-        return 0
-    fi
-    return 1
-}
-
-fetch_release_sha256_map() {
-    local release_api_url="https://api.github.com/repos/livingfree2023/nokey/releases/latest"
-    local release_json=""
-    local release_body=""
-
-    release_json="$(curl -fsSL "$release_api_url" 2>>"$LOG_FILE")" || return 1
-
-    if command -v jq >/dev/null 2>&1; then
-        release_body="$(printf '%s' "$release_json" | jq -r '.body // ""')"
-    else
-        release_body="$(printf '%s' "$release_json" | tr -d '\n' | sed -E 's/.*"body":"(.*)","reactions":\{.*/\1/' | sed 's/\\r\\n/\n/g; s/\\"/"/g; s/\\\\/\\/g')"
-    fi
-
-    if [[ -z "$release_body" ]]; then
-        return 1
-    fi
-
-    REMOTE_SHA_XRAY_AMD64="$(printf '%s\n' "$release_body" | sed -nE 's/^SHA256-xray_amd64:[[:space:]]*([0-9a-fA-F]{64})$/\1/p' | head -n1)"
-    REMOTE_SHA_XRAY_ARM64="$(printf '%s\n' "$release_body" | sed -nE 's/^SHA256-xray_arm64:[[:space:]]*([0-9a-fA-F]{64})$/\1/p' | head -n1)"
-    REMOTE_SHA_GEOIP="$(printf '%s\n' "$release_body" | sed -nE 's/^SHA256-geoip.dat:[[:space:]]*([0-9a-fA-F]{64})$/\1/p' | head -n1)"
-    REMOTE_SHA_GEOSITE="$(printf '%s\n' "$release_body" | sed -nE 's/^SHA256-geosite.dat:[[:space:]]*([0-9a-fA-F]{64})$/\1/p' | head -n1)"
-    REMOTE_SHA_REALM_AMD64="$(printf '%s\n' "$release_body" | sed -nE 's/^SHA256-realm_amd64:[[:space:]]*([0-9a-fA-F]{64})$/\1/p' | head -n1)"
-    REMOTE_SHA_REALM_ARM64="$(printf '%s\n' "$release_body" | sed -nE 's/^SHA256-realm_arm64:[[:space:]]*([0-9a-fA-F]{64})$/\1/p' | head -n1)"
-    REMOTE_SHA_REALM_MUSL_AMD64="$(printf '%s\n' "$release_body" | sed -nE 's/^SHA256-realm_musl_amd64:[[:space:]]*([0-9a-fA-F]{64})$/\1/p' | head -n1)"
-    REMOTE_SHA_REALM_MUSL_ARM64="$(printf '%s\n' "$release_body" | sed -nE 's/^SHA256-realm_musl_arm64:[[:space:]]*([0-9a-fA-F]{64})$/\1/p' | head -n1)"
-    REMOTE_SHA_SINGBOX_AMD64="$(printf '%s\n' "$release_body" | sed -nE 's/^SHA256-sing-box_amd64:[[:space:]]*([0-9a-fA-F]{64})$/\1/p' | head -n1)"
-    REMOTE_SHA_SINGBOX_ARM64="$(printf '%s\n' "$release_body" | sed -nE 's/^SHA256-sing-box_arm64:[[:space:]]*([0-9a-fA-F]{64})$/\1/p' | head -n1)"
-
-    [[ -n "$REMOTE_SHA_XRAY_AMD64" || -n "$REMOTE_SHA_XRAY_ARM64" || -n "$REMOTE_SHA_GEOIP" || -n "$REMOTE_SHA_GEOSITE" || -n "$REMOTE_SHA_REALM_AMD64" || -n "$REMOTE_SHA_REALM_ARM64" || -n "$REMOTE_SHA_REALM_MUSL_AMD64" || -n "$REMOTE_SHA_REALM_MUSL_ARM64" || -n "$REMOTE_SHA_SINGBOX_AMD64" || -n "$REMOTE_SHA_SINGBOX_ARM64" ]]
-}
-
-download_if_sha_differs() {
-    local target_path="$1"
-    local remote_sha="$2"
-    local download_url="$3"
-    local label="$4"
-    local local_sha=""
-
-    if [[ -n "$remote_sha" && -f "$target_path" ]]; then
-        local_sha="$(sha256_file "$target_path" || true)"
-        if [[ -n "$local_sha" && "$local_sha" == "$remote_sha" ]]; then
-            info "跳过下载，${label} 已是最新 / Skip download: ${label} is up to date (sha256 matched)"
-            log_verbose "Skip download for ${label}: local sha256 matches release sha256 (${local_sha})"
-            return 0
-        fi
-    fi
-
-    log_verbose "Downloading: ${download_url} -> ${target_path}"
-    curl -fSL "$download_url" -o "$target_path" >> "$LOG_FILE" 2>&1 || return 1
-    return 0
-}
 
 check_root() {
     if [[ $dry_run -eq 1 ]]; then
@@ -846,26 +778,12 @@ install_xray() {
     
     log_info "正在从GitHub Releases下载xray二进制文件 / Downloading xray binary and data files from GitHub Releases"
 
-    local remote_sha_xray=""
-    local remote_sha_geoip=""
-    local remote_sha_geosite=""
-    if fetch_release_sha256_map; then
-        if [[ "$arch_binary_name" == "xray_amd64" ]]; then
-            remote_sha_xray="$REMOTE_SHA_XRAY_AMD64"
-        else
-            remote_sha_xray="$REMOTE_SHA_XRAY_ARM64"
-        fi
-        remote_sha_geoip="$REMOTE_SHA_GEOIP"
-        remote_sha_geosite="$REMOTE_SHA_GEOSITE"
-        log_verbose "Fetched release checksums successfully for comparison"
-    else
-        warn "获取Release校验和失败，回退到直接下载文件 / Failed to fetch release checksums; fallback to downloading files directly."
-        log_verbose "Failed to fetch/parse release checksum metadata from latest release"
-    fi
-
-    download_if_sha_differs "/usr/local/bin/xray" "$remote_sha_xray" "${GITHUB_RELEASE_BASE_URL}/${arch_binary_name}" "${arch_binary_name}" || { task_fail; error "下载${arch_binary_name}失败 / Failed to download ${arch_binary_name}"; exit 1; }
-    download_if_sha_differs "/usr/local/share/xray/geoip.dat" "$remote_sha_geoip" "${GITHUB_RELEASE_BASE_URL}/geoip.dat" "geoip.dat" || { task_fail; error "下载geoip.dat失败 / Failed to download geoip.dat"; exit 1; }
-    download_if_sha_differs "/usr/local/share/xray/geosite.dat" "$remote_sha_geosite" "${GITHUB_RELEASE_BASE_URL}/geosite.dat" "geosite.dat" || { task_fail; error "下载geosite.dat失败 / Failed to download geosite.dat"; exit 1; }
+    log_verbose "Downloading: ${GITHUB_RELEASE_BASE_URL}/${arch_binary_name} -> /usr/local/bin/xray"
+    curl -fSL "${GITHUB_RELEASE_BASE_URL}/${arch_binary_name}" -o /usr/local/bin/xray >> "$LOG_FILE" 2>&1 || { task_fail; error "下载${arch_binary_name}失败 / Failed to download ${arch_binary_name}"; exit 1; }
+    log_verbose "Downloading: ${GITHUB_RELEASE_BASE_URL}/geoip.dat -> /usr/local/share/xray/geoip.dat"
+    curl -fSL "${GITHUB_RELEASE_BASE_URL}/geoip.dat" -o /usr/local/share/xray/geoip.dat >> "$LOG_FILE" 2>&1 || { task_fail; error "下载geoip.dat失败 / Failed to download geoip.dat"; exit 1; }
+    log_verbose "Downloading: ${GITHUB_RELEASE_BASE_URL}/geosite.dat -> /usr/local/share/xray/geosite.dat"
+    curl -fSL "${GITHUB_RELEASE_BASE_URL}/geosite.dat" -o /usr/local/share/xray/geosite.dat >> "$LOG_FILE" 2>&1 || { task_fail; error "下载geosite.dat失败 / Failed to download geosite.dat"; exit 1; }
     chmod 755 /usr/local/bin/xray
     log_verbose "Set executable permissions on /usr/local/bin/xray"
 
@@ -1009,21 +927,9 @@ install_singbox() {
     mkdir -p /usr/local/bin || { task_fail; error "创建sing-box目录失败 / Failed to create sing-box directories"; exit 1; }
     log_verbose "Created install directories under /usr/local"
     
-    # Fetch SHA for sing-box binary from release if possible
-    local remote_sha_singbox=""
-    if fetch_release_sha256_map; then
-        if [[ "$arch_binary_name" == "sing-box_amd64" ]]; then
-            remote_sha_singbox="$REMOTE_SHA_SINGBOX_AMD64"
-        else
-            remote_sha_singbox="$REMOTE_SHA_SINGBOX_ARM64"
-        fi
-        log_verbose "Fetched release checksums successfully for comparison"
-    else
-        warn "获取Release校验和失败，回退到直接下载文件 / Failed to fetch release checksums; fallback to downloading files directly."
-    fi
-    
     local download_url="${GITHUB_RELEASE_BASE_URL}/${arch_binary_name}"
-    if download_if_sha_differs "/usr/local/bin/sing-box" "$remote_sha_singbox" "$download_url" "${arch_binary_name}"; then
+    log_verbose "Downloading: ${download_url} -> /usr/local/bin/sing-box"
+    if curl -fSL "$download_url" -o /usr/local/bin/sing-box >> "$LOG_FILE" 2>&1; then
         chmod 755 /usr/local/bin/sing-box
         log_verbose "Set executable permissions on /usr/local/bin/sing-box"
         if ! /usr/local/bin/sing-box version >/dev/null 2>&1; then
@@ -1718,22 +1624,8 @@ install_realm() {
 
     mkdir -p /usr/local/bin "$REALM_CONFIG_DIR" || { task_fail; error "创建Realm目录失败 / Failed to create realm directories"; exit 1; }
 
-    local remote_sha=""
-    if fetch_release_sha256_map; then
-        if [[ "$arch_binary_name" == "realm_musl_amd64" ]]; then
-            remote_sha="$REMOTE_SHA_REALM_MUSL_AMD64"
-        elif [[ "$arch_binary_name" == "realm_musl_arm64" ]]; then
-            remote_sha="$REMOTE_SHA_REALM_MUSL_ARM64"
-        elif [[ "$arch_binary_name" == "realm_amd64" ]]; then
-            remote_sha="$REMOTE_SHA_REALM_AMD64"
-        else
-            remote_sha="$REMOTE_SHA_REALM_ARM64"
-        fi
-    else
-        warn "获取Release校验和失败，回退到直接下载文件 / Failed to fetch release checksums; fallback to downloading files directly."
-    fi
-
-    download_if_sha_differs "/usr/local/bin/realm" "$remote_sha" "${GITHUB_RELEASE_BASE_URL}/${arch_binary_name}" "${arch_binary_name}" || { task_fail; error "下载${arch_binary_name}失败 / Failed to download ${arch_binary_name}"; exit 1; }
+    log_verbose "Downloading: ${GITHUB_RELEASE_BASE_URL}/${arch_binary_name} -> /usr/local/bin/realm"
+    curl -fSL "${GITHUB_RELEASE_BASE_URL}/${arch_binary_name}" -o /usr/local/bin/realm >> "$LOG_FILE" 2>&1 || { task_fail; error "下载${arch_binary_name}失败 / Failed to download ${arch_binary_name}"; exit 1; }
     chmod 755 /usr/local/bin/realm
 
     local realm_rc_tmp

@@ -38,6 +38,8 @@
 
 ### 极速安装（在root下）
 ```
+rm -f /usr/local/bin/nokey  # 删除老文件
+
 curl -fsSL -o /usr/local/bin/nokey https://raw.githubusercontent.com/livingfree2023/nokey/refs/heads/main/nokey.sh && chmod +x /usr/local/bin/nokey
 ```
 

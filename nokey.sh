@@ -1090,7 +1090,6 @@ install_singbox() {
     {
       "type": "vless",
       "tag": "vless-in",
-      "listen": "::",
       "listen_port": $port,
       "users": [
         {
@@ -1552,7 +1551,6 @@ build_xray_config() {
         },
         "inbounds": [
           {
-            "listen": "0.0.0.0",
             "port": ${port},
             "protocol": "vless",
             "settings": {

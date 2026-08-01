@@ -919,10 +919,14 @@ install_singbox() {
     task_done
     
     # For sing-box, we'll use default values similar to install-singbox.sh
-    # Generate random port if not set
+    # Generate random port if not set (prefer 443 when free or owned by sing-box)
     if [[ -z $port ]]; then
-        port=$(shuf -i 10000-60000 -n 1 2>/dev/null || echo $((RANDOM % 50001 + 10000)))
-        log_info "使用随机端口: $port"
+        if is_port_reusable 443 sing-box "$SINGBOX_SERVICE_NAME" "$SINGBOX_SERVICE_NAME_ALPINE"; then
+            port=443
+        else
+            port=$(shuf -i 10000-60000 -n 1 2>/dev/null || echo $((RANDOM % 50001 + 10000)))
+        fi
+        log_info "使用端口: $port"
     fi
     
     # Generate UUID if not set (sing-box VLESS uses standard UUID format)
@@ -1346,6 +1350,60 @@ parse_args() {
 
 
 
+# Returns 0 if <port> is free or already owned by <process_name>, so the port can
+# be safely reused by our service; 1 otherwise. Falls back to service status when
+# ss/netstat are unavailable.
+# Usage: is_port_reusable <port> <process_name> <systemd_service> <openrc_service>
+is_port_reusable() {
+    local check_port="$1"
+    local process_name="$2"
+    local systemd_service="$3"
+    local openrc_service="$4"
+    local port_in_use=0
+
+    if command -v ss >/dev/null 2>&1; then
+        if ss -ltn "sport = :$check_port" 2>/dev/null | grep -q .; then
+            port_in_use=1
+        fi
+    elif command -v netstat >/dev/null 2>&1; then
+        if netstat -ltn 2>/dev/null | grep -qE "[:]$check_port($| )"; then
+            port_in_use=1
+        fi
+    else
+        if (echo > /dev/tcp/127.0.0.1/"$check_port") >/dev/null 2>&1; then
+            port_in_use=1
+        fi
+    fi
+
+    if [[ $port_in_use -eq 0 ]]; then
+        return 0
+    fi
+
+    # Port is in use: reusable only if it belongs to our service
+    if command -v ss >/dev/null 2>&1; then
+        if ss -ltnp "sport = :$check_port" 2>/dev/null | grep -q "$process_name"; then
+            return 0
+        fi
+    elif command -v netstat >/dev/null 2>&1; then
+        if netstat -ltnp 2>/dev/null | grep -E "[:.]$check_port($| )" | grep -q "$process_name"; then
+            return 0
+        fi
+    else
+        # Without ss/netstat we cannot identify the process; if the service is
+        # active, assume it owns the port.
+        if [ "$ID" = "alpine" ] || [ "$ID_LIKE" = "alpine" ]; then
+            if rc-service "$openrc_service" status >/dev/null 2>&1; then
+                return 0
+            fi
+        else
+            if systemctl is-active --quiet "$systemd_service"; then
+                return 0
+            fi
+        fi
+    fi
+    return 1
+}
+
 initialize_variables() {
     # If caddy mode is enabled, detect and set domain/port from Caddyfile
     if [[ $caddy_mode -eq 1 ]]; then
@@ -1354,21 +1412,26 @@ initialize_variables() {
 
     initialize_ip_from_netstack
 
-    task_start "寻找一个无辜的端口 / Find a Random Unused Port"
-    if [[ -z $port ]]; then      
-      base=$((10000 + RANDOM % 50000))  # Start at a random offset
-      port_found=0
-      for i in $(seq 0 1000); do
-        port=$((base + i))
-        if ! (echo > /dev/tcp/127.0.0.1/"$port") >/dev/null 2>&1; then
-          port_found=1
-          break
+    task_start "寻找一个合适的端口 / Find an Available Port"
+    if [[ -z $port ]]; then
+      # Prefer 443 when it is free or already owned by Xray, otherwise random
+      if is_port_reusable 443 xray "$SERVICE_NAME" "$SERVICE_NAME_ALPINE"; then
+        port=443
+      else
+        base=$((10000 + RANDOM % 50000))  # Start at a random offset
+        port_found=0
+        for i in $(seq 0 1000); do
+          port=$((base + i))
+          if ! (echo > /dev/tcp/127.0.0.1/"$port") >/dev/null 2>&1; then
+            port_found=1
+            break
+          fi
+        done
+        if [[ $port_found -eq 0 ]]; then
+          task_fail
+          error "没有找到可用端口 / Could not find an unused port."
+          exit 1
         fi
-      done
-      if [[ $port_found -eq 0 ]]; then
-        task_fail
-        error "没有找到可用端口 / Could not find an unused port."
-        exit 1
       fi
       # info "\n找到一个空闲随机端口，如果有防火墙需要放行 / Random unused port found, if firewall enabled, add tcp rules for: ${cyan}$port${none}"
     fi

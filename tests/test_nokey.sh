@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# shellcheck disable=SC2034,SC2154  # mock globals read by sourced nokey.sh functions
+# shellcheck disable=SC2034,SC2154,SC2317  # mock globals/functions read indirectly by sourced nokey.sh code
 set -euo pipefail
 
 # *_url vars below are assigned inside generate_share_links (sourced script).
@@ -219,6 +219,72 @@ EOF
   rm -rf "$pty_dir" "$tmp_script"
 else
   pass "URL_FILE plainness skipped (script/mktemp unavailable)"
+fi
+
+# Test 17: is_port_reusable returns 0 when nothing is listening (free port)
+if (
+  ss() { return 0; }  # mock: no listeners
+  is_port_reusable 443 xray "$SERVICE_NAME" "$SERVICE_NAME_ALPINE"
+); then
+  pass "port reusable when free"
+else
+  fail "free port should be reported reusable"
+fi
+
+# Test 18: is_port_reusable returns 1 when another process owns the port
+if (
+  ss() { echo "LISTEN 0 128 0.0.0.0:443 users:((\"nginx\"))"; }
+  ! is_port_reusable 443 xray "$SERVICE_NAME" "$SERVICE_NAME_ALPINE"
+); then
+  pass "port not reusable when owned by another process"
+else
+  fail "foreign-owned port must not be reusable"
+fi
+
+# Test 19: is_port_reusable returns 0 when xray already owns the port
+if (
+  ss() { echo "LISTEN 0 128 0.0.0.0:443 users:((\"xray\"))"; }
+  is_port_reusable 443 xray "$SERVICE_NAME" "$SERVICE_NAME_ALPINE"
+); then
+  pass "port reusable when owned by xray"
+else
+  fail "xray-owned port should be reusable"
+fi
+
+# Test 20: initialize_variables prefers 443 when it is reusable
+if (
+  is_port_reusable() { return 0; }  # mock: 443 deemed reusable
+  netstack=""
+  ip=""
+  IPv4="198.51.100.30"
+  IPv6="2001:db8::30"
+  port=""
+  domain="example.com"
+  caddy_mode=0
+  initialize_variables >/dev/null 2>&1
+  [[ "$port" == "443" ]]
+); then
+  pass "443 preferred when reusable"
+else
+  fail "port should be 443 when reusable"
+fi
+
+# Test 21: initialize_variables falls back to a random port >= 10000 when 443 is taken
+if (
+  is_port_reusable() { return 1; }  # mock: 443 occupied by another process
+  netstack=""
+  ip=""
+  IPv4="198.51.100.31"
+  IPv6="2001:db8::31"
+  port=""
+  domain="example.com"
+  caddy_mode=0
+  initialize_variables >/dev/null 2>&1
+  [[ "$port" != "443" && "$port" -ge 10000 ]]
+); then
+  pass "random fallback when 443 occupied"
+else
+  fail "port should be random >= 10000 when 443 is taken"
 fi
 
 echo "All tests passed."

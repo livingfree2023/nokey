@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# shellcheck disable=SC2034,SC2154,SC2317  # mock globals/functions read indirectly by sourced nokey.sh code
+# shellcheck disable=SC2034,SC2154,SC2317,SC2030,SC2031  # mock globals/functions read indirectly by sourced nokey.sh code; subshell-write/read pairs are intentional
 set -euo pipefail
 
 # *_url vars below are assigned inside generate_share_links (sourced script).
@@ -95,17 +95,22 @@ sysctl_apply_cmd="sysctl -p >> \"\$LOG_FILE\" 2>&1 || true"
 pass "bbr live-state verification present"
 
 # Test 9: initialize_ip_from_netstack auto-detects IPv4 when IPv4/IPv6 empty
-ip=""
-IPv4=""
-IPv6=""
-netstack=""
-detect_network_interfaces() {
-    IPv4="203.0.113.10"
-}
-initialize_ip_from_netstack >/dev/null 2>&1 || fail "initialize_ip_from_netstack should trigger detection when IPv4/IPv6 empty"
-[[ -n "$ip" ]] || fail "ip should be set after fallback detection"
-[[ "$ip" == "203.0.113.10" ]] || fail "ip should match mock detection result"
-pass "netstack fallback detection"
+if (
+  ip=""
+  IPv4=""
+  IPv6=""
+  netstack=""
+  detect_network_interfaces() {
+      IPv4="203.0.113.10"
+  }
+  initialize_ip_from_netstack >/dev/null 2>&1
+  [[ -n "$ip" ]]
+  [[ "$ip" == "203.0.113.10" ]]
+); then
+  pass "netstack fallback detection"
+else
+  fail "initialize_ip_from_netstack should trigger detection when IPv4/IPv6 empty"
+fi
 
 # Test 10: netstack=6 yields non-empty ip when IPv6 is present (defensive detection)
 netstack="6"
@@ -342,5 +347,79 @@ if (
 else
   fail "picker should fall back to DEFAULT_DOMAIN when scan finds nothing"
 fi
+
+# Test 26: detect_network_interfaces falls back to ip.sb when the cloudflare v6 probe is empty
+if (
+  unset IPv4 IPv6
+  curl() {
+    if [[ "$1" == "-4s" ]]; then
+      printf 'ip=203.0.113.10\n'
+    elif [[ "$*" == *"ip.sb"* ]]; then
+      printf '2001:db8::10\n'
+    else
+      printf ''  # cloudflare v6 trace probe returns empty -> triggers ip.sb fallback
+    fi
+  }
+  detect_network_interfaces >/dev/null 2>&1
+  [[ "$IPv4" == "203.0.113.10" && "$IPv6" == "2001:db8::10" ]]
+); then
+  pass "ip.sb fallback detection"
+else
+  fail "IPv6 should fall back to ip.sb when cloudflare v6 probe is empty"
+fi
+
+# Test 27: dual-stack box emits IPv6 share URL + clash entry when netstack=4
+share_dir="$(mktemp -d)"
+if (
+  cd "$share_dir" || exit 1
+  sing_box_mode=0
+  netstack="4"
+  ip="198.51.100.10"
+  IPv6="2001:db8::10"
+  port="443"
+  domain="example.com"
+  uuid="test-uuid"
+  fingerprint="chrome"
+  public_key="test-pbk"
+  shortid="abcd"
+  current_hostname="testhost"
+  mldsa_enabled=0
+  generate_ipv6_variants >/dev/null 2>&1
+  [[ -f "$URL_FILE" ]] \
+    && grep -q "vless://test-uuid@\[2001:db8::10\]:443" "$URL_FILE" \
+    && grep -q "#testhost-ipv6" "$URL_FILE" \
+    && grep -q -- "- name: testhost-ipv6" "$URL_FILE" \
+    && grep -q "server: 2001:db8::10" "$URL_FILE"
+); then
+  pass "dual-stack IPv6 variants"
+else
+  fail "netstack=4 with IPv6 detected should emit IPv6 share URL and clash entry"
+fi
+rm -rf "$share_dir"
+
+# Test 28: IPv6 variants skipped when netstack=6 (primary is already IPv6)
+share_dir="$(mktemp -d)"
+if (
+  cd "$share_dir" || exit 1
+  sing_box_mode=0
+  netstack="6"
+  ip="[2001:db8::10]"
+  IPv6="2001:db8::10"
+  port="443"
+  domain="example.com"
+  uuid="test-uuid"
+  fingerprint="chrome"
+  public_key="test-pbk"
+  shortid="abcd"
+  current_hostname="testhost"
+  mldsa_enabled=0
+  generate_ipv6_variants >/dev/null 2>&1
+  [[ ! -f "$URL_FILE" ]]
+); then
+  pass "IPv6 variants skipped on netstack=6"
+else
+  fail "netstack=6 should not emit duplicate IPv6 variants"
+fi
+rm -rf "$share_dir"
 
 echo "All tests passed."

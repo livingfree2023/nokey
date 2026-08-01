@@ -2,7 +2,7 @@
 
 # Constants and Configuration
 
-readonly SCRIPT_VERSION="2026.15" 
+readonly SCRIPT_VERSION="2026.16" 
 readonly LOG_FILE="nokey.log"
 readonly URL_FILE="nokey.url"
 readonly DEFAULT_DOMAIN="www.amd.com"
@@ -283,6 +283,10 @@ detect_network_interfaces() {
 
     Public_IPv4=$(curl -4s -m 2 https://www.cloudflare.com/cdn-cgi/trace | awk -F= '/^ip=/{print $2}')
     Public_IPv6=$(curl -6s -m 2 https://www.cloudflare.com/cdn-cgi/trace | awk -F= '/^ip=/{print $2}')
+    if [[ -z "$Public_IPv6" ]]; then
+        # ip.sb returns a bare address (not key=value); fallback when the cloudflare v6 trace probe is empty
+        Public_IPv6=$(curl -6s -m 2 https://ip.sb)
+    fi
 
     [[ -n "$Public_IPv4" ]] && IPv4="$Public_IPv4"
     [[ -n "$Public_IPv6" ]] && IPv6="$Public_IPv6"
@@ -2278,6 +2282,39 @@ EOF
     echo "$clash_meta_config" >> "$URL_FILE"
 }
 
+# Emit an extra IPv6 share URL + clash entry when the box is dual-stack but the
+# primary netstack is IPv4. The main links above already cover the primary IP.
+generate_ipv6_variants() {
+    [[ $netstack == "4" && -n "${IPv6:-}" ]] || return 0
+
+    local ipv6_link
+    ipv6_link="vless://${uuid}@[${IPv6}]:${port}?flow=xtls-rprx-vision&encryption=none&type=tcp&security=reality&sni=${domain}&fp=${fingerprint}&pbk=${public_key}&sid=${shortid}#${current_hostname}-ipv6"
+    info "分享链接 (IPv6) / Share Link (IPv6):"
+    echo -e "${magenta}${ipv6_link}${none}" | tee -a "$LOG_FILE"
+    echo "$ipv6_link" >> "$URL_FILE"
+
+    local ipv6_clash
+    ipv6_clash=$(cat <<-EOF
+- name: ${current_hostname}-ipv6
+  type: vless
+  server: ${IPv6}
+  port: ${port}
+  client-fingerprint: ${fingerprint}
+  tls: true
+  servername: ${domain}
+  flow: xtls-rprx-vision
+  network: tcp
+  reality-opts:
+    public-key: ${public_key}
+    short-id: ${shortid}
+  uuid: ${uuid}
+EOF
+)
+    info "Clash.meta 配置 (IPv6) / Clash.meta config (IPv6):"
+    echo -e "${cyan}${ipv6_clash}${none}" | tee -a "$LOG_FILE"
+    echo "$ipv6_clash" >> "$URL_FILE"
+}
+
 output_results() {
     # 指纹FingerPrint
     fingerprint="random"
@@ -2303,6 +2340,7 @@ output_results() {
 
     generate_share_links
     generate_clash_config
+    generate_ipv6_variants
 }
 
 

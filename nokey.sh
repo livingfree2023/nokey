@@ -31,6 +31,7 @@ caddy_mode=0
 reality_dest_port=443  # default port for REALITY destination (not the inbound port)
 dry_run=0
 keepconfig=0
+remove_mode=0
 arg_port_set=0
 arg_domain_set=0
 arg_uuid_set=0
@@ -44,17 +45,25 @@ realm_only=0
 realm_remote=""
 realm_listen=""
 
-# Sing-box mode variables
+# Sing-box mode variable
 sing_box_mode=0
-sing_box_only=0
 
-# Color definitions
-readonly red='\e[91m'
-readonly green='\e[92m'
-readonly yellow='\e[93m'
-readonly magenta='\e[95m'
-readonly cyan='\e[96m'
-readonly none='\e[0m'
+# Color definitions (suppressed when stdout is not a TTY to keep logs/pipes clean)
+if [[ -t 1 ]]; then
+    readonly red='\e[91m'
+    readonly green='\e[92m'
+    readonly yellow='\e[93m'
+    readonly magenta='\e[95m'
+    readonly cyan='\e[96m'
+    readonly none='\e[0m'
+else
+    readonly red=''
+    readonly green=''
+    readonly yellow=''
+    readonly magenta=''
+    readonly cyan=''
+    readonly none=''
+fi
 
 
 init_output_files() {
@@ -109,6 +118,7 @@ separator() {
     echo -e "${cyan}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${none}"
 }
 
+# shellcheck disable=SC2119,SC2120  # $1 is an optional arch override (used by tests)
 resolve_arch_binary_name() {
     case "${1:-$(uname -m)}" in
         x86_64|amd64)
@@ -123,6 +133,7 @@ resolve_arch_binary_name() {
     esac
 }
 
+# shellcheck disable=SC2119,SC2120  # $1 is an optional arch override (used by tests)
 resolve_arch_name() {
     case "${1:-$(uname -m)}" in
         x86_64|amd64)
@@ -145,6 +156,7 @@ resolve_os_family() {
     fi
 }
 
+# shellcheck disable=SC2119,SC2120  # $1 is an optional arch override (used by tests)
 resolve_singbox_arch_name() {
     case "${1:-$(uname -m)}" in
         x86_64|amd64)
@@ -159,6 +171,7 @@ resolve_singbox_arch_name() {
     esac
 }
 
+# shellcheck disable=SC2119,SC2120  # $1 is an optional arch override (used by tests)
 resolve_realm_arch_name() {
     local use_musl=0
     if [ "$ID" = "alpine" ] || [ "$ID_LIKE" = "alpine" ]; then
@@ -200,13 +213,12 @@ check_root() {
 # Define the alias line
 #alias_line="alias nokey='bash -c \"\$(curl -sL https://raw.githubusercontent.com/livingfree2023/xray-vless-reality-nokey/refs/heads/main/nokey.sh)\" @'"
 alias_line="alias nokey=\"$GITHUB_CMD\""
-# Array of potential shell config files
+# Array of potential shell config files (bash-compatible only; fish uses different alias syntax)
 config_files=(
     "$HOME/.bashrc"
     "$HOME/.bash_profile"
     "$HOME/.zshrc"
     "$HOME/.profile"
-    "$HOME/.config/fish/config.fish"
 )
 
 # Function to add alias to a file if not already present
@@ -229,7 +241,8 @@ remove_alias() {
     for file in "${config_files[@]}"; do
         if [ -f "$file" ]; then
             if grep -Fxq "$alias_line" "$file"; then
-                sed -i.bak "/$(echo "$alias_line" | sed 's/[\/&]/\\&/g')/d" "$file"
+                cp -p "$file" "$file.bak"
+                grep -vF "$alias_line" "$file" > "$file.tmp" && mv "$file.tmp" "$file"
                 echo "已从 $file 移除别名 (备份: $file.bak) / Removed alias from $file (backup created as $file.bak)"
             else
                 echo "$file 中未找到别名 / Alias not found in $file"
@@ -909,7 +922,7 @@ install_singbox() {
     # Generate random port if not set
     if [[ -z $port ]]; then
         port=$(shuf -i 10000-60000 -n 1 2>/dev/null || echo $((RANDOM % 50001 + 10000)))
-        log_info "使用随机端口: $PORT"
+        log_info "使用随机端口: $port"
     fi
     
     # Generate UUID if not set (sing-box VLESS uses standard UUID format)
@@ -1234,7 +1247,7 @@ parse_args() {
               ;;
             *)
               error "错误: 无效的网络协议栈值 / Error: Invalid netstack value"
-              show_help
+              show_help 1
               ;;
           esac
           ;;
@@ -1242,7 +1255,7 @@ parse_args() {
           port="${arg#*=}"
           if ! [[ "$port" =~ ^[0-9]+$ ]] || (( port < 1 || port > 65535 )); then
             error "错误: 端口必须是 1-65535 的数字 / Error: --port must be an integer between 1 and 65535"
-            show_help
+            show_help 1
           fi
           arg_port_set=1
           ;;
@@ -1281,7 +1294,6 @@ parse_args() {
             ;;
         --singbox-only)
             sing_box_mode=1
-            sing_box_only=1
             ;;
         --remote=*)
             realm_remote="${arg#*=}"
@@ -1297,25 +1309,14 @@ parse_args() {
           keepconfig=1
           ;;
         --remove)
-          remove_alias
-          if [[ $realm_mode -eq 1 ]]; then
-            uninstall_realm
-          fi
-          if [[ $sing_box_mode -eq 1 ]]; then
-            uninstall_singbox
-          fi
-          if [[ $realm_only -ne 1 && $sing_box_mode -ne 1 ]]; then
-            uninstall_xray
-          fi
-          info "卸载完成 / Uninstallation complete ... [${green}OK${none}]"
-          exit 0
+          remove_mode=1
           ;;
         --dry-run)
           dry_run=1
           ;;
         *)
           error "什么鬼参数: $arg / Unknown option: $arg"
-          show_help
+          show_help 1
           ;;
       esac
     done
@@ -1565,7 +1566,7 @@ EOF
     task_done
 
 log_info "--- ${config_path} ---"
-    cat "$config_path" | tee -a "$LOG_FILE"
+    tee -a "$LOG_FILE" < "$config_path"
 }
 
 restart_xray_service() {
@@ -1710,7 +1711,7 @@ configure_realm() {
     fi
 
     local realm_config="${REALM_CONFIG_DIR}/config.json"
-    cat > "$realm_config" <<-REALMCFG
+    if ! cat > "$realm_config" <<-REALMCFG
 {
   "dns": {
     "mode": "ipv4_and_ipv6"
@@ -1723,7 +1724,7 @@ configure_realm() {
   ]
 }
 REALMCFG
-    if [[ $? -ne 0 ]]; then
+    then
         task_fail
         error "写入Realm配置文件失败: $realm_config / Failed to write realm config to $realm_config."
         exit 1
@@ -1732,7 +1733,7 @@ REALMCFG
     task_done_with_info "listen=${realm_listen}, remote=${realm_remote}"
 
 log_info "--- ${realm_config} ---"
-    cat "$realm_config" | tee -a "$LOG_FILE"
+    tee -a "$LOG_FILE" < "$realm_config"
 }
 
 restart_realm_service() {
@@ -1781,7 +1782,7 @@ restart_realm_service() {
 }
 
 
-# Function to display help message
+# Function to display help message; exits with $1 (default 0) so error paths can fail non-zero
 show_help() {
   echo -e "当前版本 / Version: ${cyan}${SCRIPT_VERSION}${none} "
   echo "使用方法: $0 [options] / Usage"
@@ -1806,7 +1807,7 @@ show_help() {
   echo "  --dry-run          仅预览安装动作，不写入系统 / Preview actions only"
   echo "  --help             显示此帮助信息 / Show this help message"
 
-  exit 0
+  exit "${1:-0}"
 }
 
 dry_run_preview() {
@@ -2054,7 +2055,8 @@ generate_share_links() {
         local link
         link="vless://${uuid}@${server_ip}:${port}?flow=xtls-rprx-vision&encryption=none&type=tcp&security=reality&sni=${domain}&fp=${fingerprint}&pbk=${public_key}&sid=${shortid}#${current_hostname}"
         info "分享链接 / Share Link:"
-        echo -e "${magenta}${link}${none}" | tee -a "$LOG_FILE" | tee -a "$URL_FILE"
+        echo -e "${magenta}${link}${none}" | tee -a "$LOG_FILE"
+        echo "$link" >> "$URL_FILE"
         return
     fi
 
@@ -2067,12 +2069,15 @@ generate_share_links() {
     info "分享链接 / Share Link:"
     
     if [[ $mldsa_enabled == 1 ]]; then
-      vless_reality_mldsa_url="vless://${uuid}@${ip}:${port}?flow=xtls-rprx-vision&encryption=none&type=tcp&security=reality&sni=${domain}&fp=${fingerprint}&pbk=${public_key}&sid=${shortid}&pqv=${mldsa65Verify}&#${current_hostname}"
-      echo -e "${magenta}${vless_reality_mldsa_url}${none}"  | tee -a "$LOG_FILE" | tee -a "$URL_FILE"
+      vless_reality_mldsa_url="vless://${uuid}@${ip}:${port}?flow=xtls-rprx-vision&encryption=none&type=tcp&security=reality&sni=${domain}&fp=${fingerprint}&pbk=${public_key}&sid=${shortid}&pqv=${mldsa65Verify}#${current_hostname}"
+      echo -e "${magenta}${vless_reality_mldsa_url}${none}"  | tee -a "$LOG_FILE"
+      echo "$vless_reality_mldsa_url" >> "$URL_FILE"
       info "不含mldsa / Without mldsa:"
-      echo -e "${magenta}${vless_reality_url_short}${none}"  | tee -a "$LOG_FILE" | tee -a "$URL_FILE"
+      echo -e "${magenta}${vless_reality_url_short}${none}"  | tee -a "$LOG_FILE"
+      echo "$vless_reality_url_short" >> "$URL_FILE"
     else
-      echo -e "${magenta}${vless_reality_url_short}${none}"  | tee -a "$LOG_FILE" | tee -a "$URL_FILE"
+      echo -e "${magenta}${vless_reality_url_short}${none}"  | tee -a "$LOG_FILE"
+      echo "$vless_reality_url_short" >> "$URL_FILE"
     fi
 }
 
@@ -2100,7 +2105,8 @@ generate_clash_config() {
 EOF
 )
         info "Clash.meta 配置 / Clash.meta config:"
-        echo -e "${cyan}${clash_config}${none}" | tee -a "$LOG_FILE" | tee -a "$URL_FILE"
+        echo -e "${cyan}${clash_config}${none}" | tee -a "$LOG_FILE"
+        echo "$clash_config" >> "$URL_FILE"
         return
     fi
 
@@ -2128,7 +2134,8 @@ EOF
 EOF
 )
     info "Clash.meta 配置 / Clash.meta config:"
-    echo -e "${cyan}${clash_meta_config}${none}" | tee -a "$LOG_FILE" | tee -a "$URL_FILE"
+    echo -e "${cyan}${clash_meta_config}${none}" | tee -a "$LOG_FILE"
+    echo "$clash_meta_config" >> "$URL_FILE"
 }
 
 output_results() {
@@ -2185,6 +2192,21 @@ main() {
     fi
 
     check_root
+
+    if [[ $remove_mode -eq 1 ]]; then
+        remove_alias
+        if [[ $realm_mode -eq 1 ]]; then
+            uninstall_realm
+        fi
+        if [[ $sing_box_mode -eq 1 ]]; then
+            uninstall_singbox
+        fi
+        if [[ $realm_only -ne 1 && $sing_box_mode -ne 1 ]]; then
+            uninstall_xray
+        fi
+        info "卸载完成 / Uninstallation complete ... [${green}OK${none}]"
+        exit 0
+    fi
 
     install_dependencies # the next function needs curl, in debian 9 curl is not shipped
     detect_network_interfaces

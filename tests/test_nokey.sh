@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2034,SC2154  # mock globals read by sourced nokey.sh functions
 set -euo pipefail
+
+# *_url vars below are assigned inside generate_share_links (sourced script).
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -109,5 +112,113 @@ initialize_variables >/dev/null 2>&1 || fail "initialize_variables netstack=6 wi
 [[ -n "$ip" ]] || fail "ip should be non-empty when netstack=6 and IPv6 is present"
 [[ "$ip" == "$IPv6" ]] || fail "ip should match IPv6"
 pass "netstack=6 IP validation after detection"
+
+# Test 11: parse_args rejects invalid --port/--netstack/unknown flag (non-zero exit)
+if (parse_args --port=abc >/dev/null 2>&1); then
+  fail "invalid --port should exit non-zero"
+fi
+if (parse_args --netstack=9 >/dev/null 2>&1); then
+  fail "invalid --netstack should exit non-zero"
+fi
+if (parse_args --unknown-flag >/dev/null 2>&1); then
+  fail "unknown flag should exit non-zero"
+fi
+pass "parse_args rejects invalid input"
+
+# Test 12: parse_args accepts valid --port
+port=""
+arg_port_set=0
+parse_args --port=8443
+[[ "$port" == "8443" ]] || fail "--port=8443 should set port=8443"
+pass "parse_args valid --port"
+
+# Test 13: parse_args --remove sets remove_mode without early exit
+remove_mode=0
+parse_args --remove
+[[ "$remove_mode" -eq 1 ]] || fail "--remove should set remove_mode=1"
+pass "parse_args --remove flag"
+
+# Test 14: IPv6 vless share URL brackets the address
+share_dir="$(mktemp -d)"
+if (
+  cd "$share_dir" || exit 1
+  sing_box_mode=0
+  netstack="6"
+  ip="2001:db8::1"
+  port="443"
+  domain="example.com"
+  uuid="test-uuid"
+  fingerprint="chrome"
+  public_key="test-pbk"
+  shortid="abcd"
+  current_hostname="testhost"
+  mldsa_enabled=0
+  generate_share_links >/dev/null 2>&1
+  [[ "$vless_reality_url_short" == *"@[2001:db8::1]:443"* ]]
+); then
+  pass "IPv6 share URL bracketing"
+else
+  fail "IPv6 share URL should bracket the address"
+fi
+rm -rf "$share_dir"
+
+# Test 15: mldsa URL uses &pqv= before # fragment, never &# 
+share_dir="$(mktemp -d)"
+if (
+  cd "$share_dir" || exit 1
+  sing_box_mode=0
+  netstack="4"
+  ip="198.51.100.10"
+  port="443"
+  domain="example.com"
+  uuid="test-uuid"
+  fingerprint="chrome"
+  public_key="test-pbk"
+  shortid="abcd"
+  current_hostname="testhost"
+  mldsa_enabled=1
+  mldsa65Verify="VERIFYVALUE"
+  generate_share_links >/dev/null 2>&1
+  [[ "$vless_reality_mldsa_url" == *"&pqv=VERIFYVALUE#testhost" ]] \
+    && [[ "$vless_reality_mldsa_url" != *"&#"* ]]
+); then
+  pass "mldsa share URL fragment"
+else
+  fail "mldsa URL should use &pqv= then #, never &#"
+fi
+rm -rf "$share_dir"
+
+# Test 16: URL_FILE stays ANSI-free even on a TTY (colors active)
+if command -v script >/dev/null 2>&1 && command -v mktemp >/dev/null 2>&1; then
+  pty_dir="$(mktemp -d)"
+  tmp_script="$(mktemp)"
+  cat > "$tmp_script" <<'EOF'
+cd "$1" || exit 1
+source "$2" || exit 1
+sing_box_mode=0
+netstack=4
+ip='198.51.100.10'
+port='12345'
+domain='example.com'
+uuid='test-uuid'
+fingerprint='chrome'
+public_key='test-pbk'
+shortid='abcd'
+current_hostname='testhost'
+mldsa_enabled=0
+generate_share_links >/dev/null 2>&1
+EOF
+  script -qec "bash '$tmp_script' '$pty_dir' '$REPO_ROOT/nokey.sh'" /dev/null >/dev/null 2>&1 \
+    || script -qc "bash '$tmp_script' '$pty_dir' '$REPO_ROOT/nokey.sh'" /dev/null >/dev/null 2>&1 \
+    || true
+  if [[ -s "$pty_dir/nokey.url" ]] && ! LC_ALL=C grep -qF "$(printf '\033')" "$pty_dir/nokey.url"; then
+    pass "URL_FILE stays ANSI-free on a TTY"
+  else
+    fail "URL_FILE must not contain ANSI escapes even on a TTY"
+  fi
+  rm -rf "$pty_dir" "$tmp_script"
+else
+  pass "URL_FILE plainness skipped (script/mktemp unavailable)"
+fi
 
 echo "All tests passed."

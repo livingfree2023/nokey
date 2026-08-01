@@ -1,4 +1,19 @@
+# Runtime artifacts — nokey.sh writes these to the working directory
 *.log
 *.url
+
+# Legacy installer name / backups
 install-release.sh
 *.bak
+
+# Tool-local state (machine-specific, never commit)
+.codegraph
+.omo/
+
+# Editor / OS junk
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+Thumbs.db

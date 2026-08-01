@@ -1,0 +1,37 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "opencode/big-pickle",
+  "small_model": "opencode/deepseek-v4-flash-free",
+  "shell": "/bin/bash",
+  "instructions": ["AGENTS.md"],
+  "permission": {
+    "bash": "allow"
+  },
+  "agent": {
+    "build": {
+      "model": "opencode/big-pickle"
+    },
+    "plan": {
+      "model": "opencode/big-pickle"
+    },
+    "explore": {
+      "model": "opencode/deepseek-v4-flash-free"
+    },
+    "general": {
+      "model": "opencode/deepseek-v4-flash-free"
+    }
+  },
+  "lsp": {
+    "bash": {
+      "command": ["bash-language-server", "start"],
+      "extensions": [".sh", ".bash"]
+    },
+    "bash-ls": {
+      "disabled": true
+    }
+  },
+  "compaction": {
+    "auto": true,
+    "tail_turns": 20
+  }
+}

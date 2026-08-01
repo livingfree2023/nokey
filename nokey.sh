@@ -241,15 +241,21 @@ config_files=(
 # Function to add alias to a file if not already present
 add_alias_if_missing() {
     task_start "添加nokey别名 / Add nokey alias to env"
+    local modified_files=()
     for file in "${config_files[@]}"; do
       if [ -f "$file" ]; then
           if ! grep -Fxq "$alias_line" "$file"; then
               echo "$alias_line" >> "$file"
+              modified_files+=("$file")
           fi
       fi
     done
     task_done
 
+    if [[ ${#modified_files[@]} -gt 0 ]]; then
+        info "别名已写入 ${modified_files[*]} / Alias written to: ${modified_files[*]}"
+        info "当前会话执行 ${cyan}source ${modified_files[0]}${none} 生效，或新开终端 / Run 'source ${modified_files[0]}' in this session, or open a new terminal"
+    fi
 }
 
 # Function to remove alias from files
@@ -1426,29 +1432,43 @@ is_port_reusable() {
 # cert chain that verifies. curl verifies the chain by default; --tlsv1.3
 # forces TLS 1.3; --http2 + %{http_version}==2 proves h2. X25519 is implied:
 # every TLS 1.3 server in the pool negotiates it (3x-ui additionally requires
-# it). Returns 0 if feasible.
+# it). Returns 0 if feasible. The probe outcome (and why) is appended to the log.
 probe_reality_target() {
     local candidate="$1"
-    local http_version
-    http_version="$(curl -sSI --max-time "$REALITY_SCAN_TIMEOUT" --tlsv1.3 --http2 -o /dev/null -w '%{http_version}' "https://$candidate/" 2>/dev/null)" || return 1
-    [[ "$http_version" == "2" ]]
+    local http_version=""
+    local curl_rc=0
+    http_version="$(curl -sSI --max-time "$REALITY_SCAN_TIMEOUT" --tlsv1.3 --http2 -o /dev/null -w '%{http_version}' "https://$candidate/" 2>/dev/null)" || curl_rc=$?
+    if [[ "$http_version" == "2" ]]; then
+        log_info "REALITY probe: $candidate -> feasible (TLS 1.3 + h2 verified)"
+        return 0
+    fi
+    if [[ $curl_rc -ne 0 ]]; then
+        log_info "REALITY probe: $candidate -> rejected (curl rc=$curl_rc: connect/TLS/cert failure)"
+    else
+        log_info "REALITY probe: $candidate -> rejected (negotiated HTTP/$http_version, need h2)"
+    fi
+    return 1
 }
 
 # Auto-pick an SNI when the user did not pass --domain: probe the candidate
 # pool and use the first feasible one; fall back to DEFAULT_DOMAIN if none
-# responds. Skips the scan entirely when a domain is already set.
+# responds. Skips the scan entirely when a domain is already set. Each probe
+# step and the reason for the pick are reported to stdout and the log.
 pick_default_domain() {
     [[ -n $domain ]] && return 0
     local candidate
+    info "自动探测REALITY目标SNI / Auto-probing REALITY target SNI:"
     for candidate in "${REALITY_TARGET_CANDIDATES[@]}"; do
         if probe_reality_target "$candidate"; then
             domain="$candidate"
+            info "  ${candidate} -> ${green}可用 / feasible${none} (TLS 1.3 + h2 验证通过 / verified)"
             info "自动选择REALITY目标 / Auto-selected REALITY target: ${cyan}${domain}${none}"
             return 0
         fi
+        info "  ${candidate} -> 不可用 / not feasible (原因见日志 / reason in log)"
     done
     domain="$DEFAULT_DOMAIN"
-    info "未探测到可用的REALITY目标，使用默认SNI / No feasible REALITY target probed; using default SNI: ${cyan}${domain}${none}"
+    warn "所有候选均不可用，使用默认SNI / No feasible target probed; using default SNI: ${cyan}${domain}${none}"
     return 1
 }
 
@@ -1669,7 +1689,7 @@ EOF
     task_done
 
 log_info "--- ${config_path} ---"
-    tee -a "$LOG_FILE" < "$config_path"
+    cat "$config_path" >> "$LOG_FILE"
 }
 
 restart_xray_service() {
@@ -1836,7 +1856,7 @@ REALMCFG
     task_done_with_info "listen=${realm_listen}, remote=${realm_remote}"
 
 log_info "--- ${realm_config} ---"
-    tee -a "$LOG_FILE" < "$realm_config"
+    cat "$realm_config" >> "$LOG_FILE"
 }
 
 restart_realm_service() {
@@ -2281,18 +2301,19 @@ main() {
         exit 1
     fi
 
-    init_output_files
-
     show_banner
-    echo -e "当前版本 / Version: ${cyan}${SCRIPT_VERSION}${none} " | tee -a "$LOG_FILE"
     parse_args "$@"
 
+    # init_output_files must stay after parse_args: non-action flags exit above and must not truncate nokey.log/.url
     if [[ $dry_run -eq 1 ]]; then
         detect_network_interfaces
         initialize_ip_from_netstack
         dry_run_preview
         exit 0
     fi
+
+    init_output_files
+    echo -e "当前版本 / Version: ${cyan}${SCRIPT_VERSION}${none} " | tee -a "$LOG_FILE"
 
     check_root
 

@@ -2,7 +2,7 @@
 
 # Constants and Configuration
 
-readonly SCRIPT_VERSION="2026.14" 
+readonly SCRIPT_VERSION="2026.15" 
 readonly LOG_FILE="nokey.log"
 readonly URL_FILE="nokey.url"
 readonly DEFAULT_DOMAIN="www.amd.com"
@@ -64,6 +64,9 @@ realm_listen=""
 
 # Sing-box mode variable
 sing_box_mode=0
+
+# Last REALITY probe latency in ms (set by probe_reality_target; read by pick_default_domain)
+probe_latency_ms=""
 
 # Color definitions (suppressed when stdout is not a TTY to keep logs/pipes clean)
 if [[ -t 1 ]]; then
@@ -1224,11 +1227,17 @@ enable_bbr() {
         log_verbose "Skip net.core.default_qdisc: kernel key not available"
     fi
 
-    if sysctl -p >> "$LOG_FILE" 2>&1; then
+    # sysctl -p may exit 0 even when keys fail on read-only /proc/sys
+    # (busybox on Alpine/containers), so verify the live kernel state
+    # instead of trusting the exit code.
+    sysctl -p >> "$LOG_FILE" 2>&1 || true
+    local current_cc=""
+    current_cc="$(cat /proc/sys/net/ipv4/tcp_congestion_control 2>/dev/null || true)"
+    if [[ "$current_cc" == *bbr* ]]; then
         task_done
     else
-        task_done_with_info "跳过BBR生效：此环境不允许sysctl / Skip BBR apply: sysctl not permitted in this environment"
-        log_verbose "Skip BBR apply: sysctl -p failed (likely container/readonly procfs)"
+        warn "BBR未生效：当前拥塞算法为 ${current_cc:-unknown} / BBR not active: current congestion control is ${current_cc:-unknown}"
+        log_verbose "BBR not active: /proc/sys/net/ipv4/tcp_congestion_control=${current_cc:-unreadable}"
     fi
 
 }
@@ -1432,14 +1441,22 @@ is_port_reusable() {
 # cert chain that verifies. curl verifies the chain by default; --tlsv1.3
 # forces TLS 1.3; --http2 + %{http_version}==2 proves h2. X25519 is implied:
 # every TLS 1.3 server in the pool negotiates it (3x-ui additionally requires
-# it). Returns 0 if feasible. The probe outcome (and why) is appended to the log.
+# it). Also records TLS-handshake latency (%{time_appconnect}) into the
+# probe_latency_ms global for the picker to report. Returns 0 if feasible.
+# The probe outcome (and why) is appended to the log.
 probe_reality_target() {
     local candidate="$1"
-    local http_version=""
+    local probe_out=""
     local curl_rc=0
-    http_version="$(curl -sSI --max-time "$REALITY_SCAN_TIMEOUT" --tlsv1.3 --http2 -o /dev/null -w '%{http_version}' "https://$candidate/" 2>/dev/null)" || curl_rc=$?
+    probe_latency_ms=""
+    probe_out="$(curl -sSI --max-time "$REALITY_SCAN_TIMEOUT" --tlsv1.3 --http2 -o /dev/null -w '%{http_version}|%{time_appconnect}' "https://$candidate/" 2>/dev/null)" || curl_rc=$?
+    local http_version="${probe_out%%|*}"
+    local latency_sec="${probe_out#*|}"
+    if [[ -n "$latency_sec" && "$latency_sec" != "$http_version" ]]; then
+        probe_latency_ms="$(awk -v t="$latency_sec" 'BEGIN { printf "%.0f", t * 1000 }')"
+    fi
     if [[ "$http_version" == "2" ]]; then
-        log_info "REALITY probe: $candidate -> feasible (TLS 1.3 + h2 verified)"
+        log_info "REALITY probe: $candidate -> feasible (TLS 1.3 + h2 verified, ${probe_latency_ms}ms)"
         return 0
     fi
     if [[ $curl_rc -ne 0 ]]; then
@@ -1461,7 +1478,7 @@ pick_default_domain() {
     for candidate in "${REALITY_TARGET_CANDIDATES[@]}"; do
         if probe_reality_target "$candidate"; then
             domain="$candidate"
-            info "  ${candidate} -> ${green}可用 / feasible${none} (TLS 1.3 + h2 验证通过 / verified)"
+            info "  ${candidate} -> ${green}可用 / feasible${none} (TLS 1.3 + h2 验证通过 / verified, ${probe_latency_ms}ms)"
             info "自动选择REALITY目标 / Auto-selected REALITY target: ${cyan}${domain}${none}"
             return 0
         fi
@@ -2212,19 +2229,19 @@ generate_clash_config() {
         fi
         local clash_config
         clash_config=$(cat <<-EOF
-  - name: ${current_hostname}
-    type: vless
-    server: ${server_ip}
-    port: ${port}
-    client-fingerprint: ${fingerprint}
-    tls: true
-    servername: ${domain}
-    flow: xtls-rprx-vision
-    network: tcp
-    reality-opts:
-      public-key: ${public_key}
-      short-id: ${shortid}
-    uuid: ${uuid}
+- name: ${current_hostname}
+  type: vless
+  server: ${server_ip}
+  port: ${port}
+  client-fingerprint: ${fingerprint}
+  tls: true
+  servername: ${domain}
+  flow: xtls-rprx-vision
+  network: tcp
+  reality-opts:
+    public-key: ${public_key}
+    short-id: ${shortid}
+  uuid: ${uuid}
 EOF
 )
         info "Clash.meta 配置 / Clash.meta config:"
@@ -2241,19 +2258,19 @@ EOF
     fi
 
     clash_meta_config=$(cat <<-EOF
-  - name: ${current_hostname}
-    type: vless
-    server: ${server_ip_for_clash}
-    port: ${port}
-    client-fingerprint: ${fingerprint}
-    tls: true
-    servername: ${domain}
-    flow: xtls-rprx-vision
-    network: tcp
-    reality-opts:
-      public-key: ${public_key}
-      short-id: ${shortid}
-    uuid: ${uuid}
+- name: ${current_hostname}
+  type: vless
+  server: ${server_ip_for_clash}
+  port: ${port}
+  client-fingerprint: ${fingerprint}
+  tls: true
+  servername: ${domain}
+  flow: xtls-rprx-vision
+  network: tcp
+  reality-opts:
+    public-key: ${public_key}
+    short-id: ${shortid}
+  uuid: ${uuid}
 EOF
 )
     info "Clash.meta 配置 / Clash.meta config:"

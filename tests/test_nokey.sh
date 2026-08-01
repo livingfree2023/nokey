@@ -87,6 +87,13 @@ enable_bbr_source="$(declare -f enable_bbr)"
 [[ "$enable_bbr_source" == *'/etc/sysctl.conf is not writable'* ]] || fail "enable_bbr should expose clear skip message"
 pass "bbr readonly guard present"
 
+# Test 8b: enable_bbr verifies live kernel state instead of trusting sysctl -p exit code
+sysctl_apply_cmd="sysctl -p >> \"\$LOG_FILE\" 2>&1 || true"
+[[ "$enable_bbr_source" == *'cat /proc/sys/net/ipv4/tcp_congestion_control'* ]] || fail "enable_bbr should read back the live tcp_congestion_control value"
+[[ "$enable_bbr_source" == *'BBR not active'* ]] || fail "enable_bbr should warn when BBR did not take effect"
+[[ "$enable_bbr_source" == *"$sysctl_apply_cmd"* ]] || fail "enable_bbr should not abort when sysctl -p reports failure"
+pass "bbr live-state verification present"
+
 # Test 9: initialize_ip_from_netstack auto-detects IPv4 when IPv4/IPv6 empty
 ip=""
 IPv4=""
@@ -288,13 +295,15 @@ else
 fi
 
 # Test 22: probe_reality_target accepts a candidate whose curl probe reports h2
+# and records TLS-handshake latency into probe_latency_ms
 if (
-  curl() { printf '2\n'; }  # mock: %{http_version} reports HTTP/2
+  curl() { printf '2|0.045\n'; }  # mock: %{http_version}|%{time_appconnect} -> h2, 45ms
   probe_reality_target www.cloudflare.com
+  [[ "$probe_latency_ms" == "45" ]]
 ); then
-  pass "probe accepts h2 target"
+  pass "probe accepts h2 target with latency"
 else
-  fail "h2-negotiating target should be accepted"
+  fail "h2-negotiating target should be accepted and latency recorded"
 fi
 
 # Test 23: probe_reality_target rejects a candidate whose curl probe fails

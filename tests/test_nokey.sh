@@ -287,4 +287,51 @@ else
   fail "port should be random >= 10000 when 443 is taken"
 fi
 
+# Test 22: probe_reality_target accepts a candidate whose curl probe reports h2
+if (
+  curl() { printf '2\n'; }  # mock: %{http_version} reports HTTP/2
+  probe_reality_target www.cloudflare.com
+); then
+  pass "probe accepts h2 target"
+else
+  fail "h2-negotiating target should be accepted"
+fi
+
+# Test 23: probe_reality_target rejects a candidate whose curl probe fails
+if (
+  curl() { return 1; }  # mock: connection/TLS failure
+  probe_reality_target www.cloudflare.com
+); then
+  fail "failed probe must not be accepted"
+else
+  pass "probe rejects failed target"
+fi
+
+# Test 24: pick_default_domain picks the first feasible candidate, skipping failures
+if (
+  probe_reality_target() {
+    [[ "$1" == "www.microsoft.com" ]] && return 0
+    return 1
+  }
+  domain=""
+  pick_default_domain >/dev/null 2>&1
+  [[ "$domain" == "www.microsoft.com" ]]
+); then
+  pass "picker selects first feasible candidate"
+else
+  fail "picker should select first feasible candidate"
+fi
+
+# Test 25: pick_default_domain falls back to DEFAULT_DOMAIN when nothing is feasible
+if (
+  probe_reality_target() { return 1; }
+  domain=""
+  pick_default_domain >/dev/null 2>&1
+  [[ "$domain" == "$DEFAULT_DOMAIN" ]]
+); then
+  pass "picker falls back to default domain"
+else
+  fail "picker should fall back to DEFAULT_DOMAIN when scan finds nothing"
+fi
+
 echo "All tests passed."

@@ -30,7 +30,8 @@
 11. 支持`--realm`模式安装Realm转发代理（用`--remote`指定目标地址，`--listen`可选）
 12. 支持`--realm-only`模式仅安装Realm（不安装Xray）
 13. 支持`--singbox`模式安装Sing-box代替Xray（使用VLESS Reality Vision）
-14. 暂时想到这么多……
+14. 自动探测可用的REALITY目标SNI（参考3x-ui的REALITY Target Scanner，验证TLS 1.3 + HTTP/2）
+15. 暂时想到这么多……
 
 > 已测试包括：ubuntu22/debian11/Rocky9.2/CentOS7.6/Fedora30/Alma9.2/alpine3.22，欢迎测试提issue或者报告成功结果
 

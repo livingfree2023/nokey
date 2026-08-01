@@ -31,7 +31,8 @@ Run a single command, sit back, and wait. No chatter, no fuss—super fast. Read
 10. Generates QR codes  
 11. `--realm` mode — installs Realm relay proxy alongside Xray (`--remote` required, `--listen` optional)
 12. `--realm-only` mode — installs Realm relay proxy only (without Xray)
-13. More features coming soon...
+13. Auto-probes a feasible REALITY target SNI (mirrors 3x-ui's REALITY Target Scanner; verifies TLS 1.3 + HTTP/2)
+14. More features coming soon...
 
 ---
 

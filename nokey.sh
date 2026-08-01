@@ -6,6 +6,23 @@ readonly SCRIPT_VERSION="2026.14"
 readonly LOG_FILE="nokey.log"
 readonly URL_FILE="nokey.url"
 readonly DEFAULT_DOMAIN="www.amd.com"
+# REALITY target candidate pool for the automated SNI scan, mirroring 3x-ui's
+# REALITY Target Scanner defaults (https://github.com/MHSanaei/3x-ui,
+# internal/web/service/reality_scan.go). The first feasible candidate wins.
+readonly REALITY_TARGET_CANDIDATES=(
+    "www.cloudflare.com"
+    "www.microsoft.com"
+    "www.amazon.com"
+    "aws.amazon.com"
+    "www.samsung.com"
+    "www.nvidia.com"
+    "www.amd.com"
+    "www.intel.com"
+    "www.sony.com"
+    "dl.google.com"
+)
+# Per-candidate probe timeout (seconds) for the SNI scan.
+readonly REALITY_SCAN_TIMEOUT=5
 readonly GITHUB_URL="https://github.com/livingfree2023/nokey"
 readonly GITHUB_CMD="bash <(curl -fsSL https://raw.githubusercontent.com/livingfree2023/nokey/refs/heads/main/nokey.sh)"
 readonly SERVICE_NAME="xray.service"
@@ -937,7 +954,7 @@ install_singbox() {
     
     # Default domain if not set
     if [[ -z $domain ]]; then
-        domain="$DEFAULT_DOMAIN"
+        pick_default_domain || true
     fi
     
     # Install sing-box binary
@@ -1404,6 +1421,37 @@ is_port_reusable() {
     return 1
 }
 
+# Probe a REALITY target candidate. Mirrors 3x-ui's REALITY Target Scanner
+# feasibility gate: the server must negotiate TLS 1.3, ALPN h2, and present a
+# cert chain that verifies. curl verifies the chain by default; --tlsv1.3
+# forces TLS 1.3; --http2 + %{http_version}==2 proves h2. X25519 is implied:
+# every TLS 1.3 server in the pool negotiates it (3x-ui additionally requires
+# it). Returns 0 if feasible.
+probe_reality_target() {
+    local candidate="$1"
+    local http_version
+    http_version="$(curl -sSI --max-time "$REALITY_SCAN_TIMEOUT" --tlsv1.3 --http2 -o /dev/null -w '%{http_version}' "https://$candidate/" 2>/dev/null)" || return 1
+    [[ "$http_version" == "2" ]]
+}
+
+# Auto-pick an SNI when the user did not pass --domain: probe the candidate
+# pool and use the first feasible one; fall back to DEFAULT_DOMAIN if none
+# responds. Skips the scan entirely when a domain is already set.
+pick_default_domain() {
+    [[ -n $domain ]] && return 0
+    local candidate
+    for candidate in "${REALITY_TARGET_CANDIDATES[@]}"; do
+        if probe_reality_target "$candidate"; then
+            domain="$candidate"
+            info "自动选择REALITY目标 / Auto-selected REALITY target: ${cyan}${domain}${none}"
+            return 0
+        fi
+    done
+    domain="$DEFAULT_DOMAIN"
+    info "未探测到可用的REALITY目标，使用默认SNI / No feasible REALITY target probed; using default SNI: ${cyan}${domain}${none}"
+    return 1
+}
+
 initialize_variables() {
     # If caddy mode is enabled, detect and set domain/port from Caddyfile
     if [[ $caddy_mode -eq 1 ]]; then
@@ -1437,19 +1485,11 @@ initialize_variables() {
     fi
     task_done_with_info "$port"
 
-    # For sing-box mode, set default domain if not specified
-    if [[ $sing_box_mode -eq 1 ]]; then
-        if [[ -z $domain ]]; then
-            domain="$DEFAULT_DOMAIN"
-        fi
+    # Default domain if not set (auto-scan SNI; both sing-box and xray modes)
+    if [[ -z $domain ]]; then
+        pick_default_domain || true
     else
-        # Original domain logic for xray/realm modes
-        if [[ -z $domain ]]; then
-          # info "用户没有指定自己的SNI，使用默认 / User did not specify SNI, using default"
-          domain="$DEFAULT_DOMAIN"
-        else
-          info "用户指定了自己的SNI / User specified SNI: ${cyan}${domain}${none}"
-        fi
+        info "用户指定了自己的SNI / User specified SNI: ${cyan}${domain}${none}"
     fi
 }
 

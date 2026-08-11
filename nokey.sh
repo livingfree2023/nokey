@@ -2,7 +2,7 @@
 
 # Constants and Configuration
 
-readonly SCRIPT_VERSION="2026.17" 
+readonly SCRIPT_VERSION="2026.18" 
 readonly LOG_FILE="nokey.log"
 readonly URL_FILE="nokey.url"
 readonly DEFAULT_DOMAIN="www.amd.com"
@@ -48,6 +48,13 @@ reality_dest_port=443  # default port for REALITY destination (not the inbound p
 dry_run=0
 keepconfig=0
 remove_mode=0
+add_limiter_mode=0
+change_sni_mode=0
+arg_count=0
+xray_config_path="/usr/local/etc/xray/config.json"
+patch_jq_source=""
+patch_cleanup=""
+patch_tmp_out=""
 arg_port_set=0
 arg_domain_set=0
 arg_uuid_set=0
@@ -677,6 +684,23 @@ validate_keepconfig_conflicts() {
     fi
 }
 
+validate_patch_mode_conflicts() {
+    # Standalone patch modes: never combined with other flags or each other.
+    if [[ $add_limiter_mode -eq 0 && $change_sni_mode -eq 0 ]]; then
+        return 0
+    fi
+
+    if [[ $add_limiter_mode -eq 1 && $change_sni_mode -eq 1 ]]; then
+        error "冲突：--add-limiter与--change-sni不能同时使用 / Conflict: --add-limiter and --change-sni cannot be used together."
+        exit 1
+    fi
+
+    if [[ $arg_count -gt 1 ]]; then
+        error "冲突：--add-limiter/--change-sni是独立补丁模式，不能与其他参数同时使用 / Conflict: --add-limiter/--change-sni are standalone patch modes and cannot be combined with any other flag."
+        exit 1
+    fi
+}
+
 load_runtime_vars_from_existing_config() {
     local config_path="/usr/local/etc/xray/config.json"
     local x25519_output=""
@@ -1269,6 +1293,7 @@ show_banner() {
 parse_args() {
     # Parse command line arguments
     for arg in "$@"; do
+      arg_count=$((arg_count + 1))
       case $arg in
         --help)
           show_help
@@ -1350,6 +1375,12 @@ parse_args() {
         --remove)
           remove_mode=1
           ;;
+        --add-limiter)
+          add_limiter_mode=1
+          ;;
+        --change-sni)
+          change_sni_mode=1
+          ;;
         --dry-run)
           dry_run=1
           ;;
@@ -1361,6 +1392,7 @@ parse_args() {
     done
 
     validate_keepconfig_conflicts
+    validate_patch_mode_conflicts
 
      if [[ $realm_mode -eq 1 ]]; then
          if [[ -z "$realm_remote" ]]; then
@@ -1767,6 +1799,138 @@ configure_xray() {
 }
 
 
+# ---- Patch modes (--add-limiter / --change-sni) ----
+
+# Resolve the jq-parseable view of the existing config: the config itself when
+# it is pure JSON, or a comment-stripped temp copy otherwise. Sets
+# $patch_jq_source to the path to read from; records a temp file in
+# $patch_cleanup (if any) for the caller to remove.
+resolve_jq_config_source() {
+    local config_path="$xray_config_path"
+    patch_jq_source=""
+    patch_cleanup=""
+    if ! command -v jq >/dev/null 2>&1; then
+        error "--add-limiter/--change-sni需要jq，请先安装jq / Patch modes require jq. Please install jq first: apt install -y jq"
+        return 1
+    fi
+    if [[ ! -f "$config_path" ]]; then
+        error "缺少配置文件: $config_path，补丁模式需要现有配置文件 / Missing config: $config_path. Patch modes require an existing config file."
+        return 1
+    fi
+    if jq empty "$config_path" >/dev/null 2>&1; then
+        patch_jq_source="$config_path"
+        return 0
+    fi
+    patch_cleanup="$(mktemp /tmp/nokey-config-json.XXXXXX)" || {
+        error "无法创建临时文件用于JSONC解析 / Failed to create temporary file for JSONC parsing."
+        return 1
+    }
+    # Config may include // comments; strip them so jq can parse it.
+    sed -E 's@[[:space:]]+//.*$@@' "$config_path" > "$patch_cleanup"
+    if ! jq empty "$patch_cleanup" >/dev/null 2>&1; then
+        rm -f "$patch_cleanup"
+        patch_cleanup=""
+        error "配置文件格式无效 / Invalid config format in $config_path."
+        return 1
+    fi
+    patch_jq_source="$patch_cleanup"
+}
+
+# Same randomization as build_xray_config: ~1 Mbps sustained / 2 Mbps burst,
+# Xray docs mandate randomization for one-click installers to avoid a
+# fixed-rate fingerprint.
+add_limiter_to_existing_config() {
+    local fallback_bytes_per_sec=""
+    local fallback_burst_bytes_per_sec=""
+    local limiter_up=""
+    local limiter_down=""
+
+    fallback_bytes_per_sec=$((125000 * (85 + RANDOM % 31) / 100))
+    fallback_burst_bytes_per_sec=$((250000 * (85 + RANDOM % 31) / 100))
+    limiter_up="{\"afterBytes\": 0, \"bytesPerSec\": ${fallback_bytes_per_sec}, \"burstBytesPerSec\": ${fallback_burst_bytes_per_sec}}"
+    limiter_down="{\"afterBytes\": 0, \"bytesPerSec\": ${fallback_bytes_per_sec}, \"burstBytesPerSec\": ${fallback_burst_bytes_per_sec}}"
+
+    if ! jq --argjson up "$limiter_up" --argjson down "$limiter_down" \
+            '.inbounds[0].streamSettings.realitySettings.limitFallbackUpload = $up | .inbounds[0].streamSettings.realitySettings.limitFallbackDownload = $down' \
+            "$patch_jq_source" > "$patch_tmp_out" 2>>"$LOG_FILE"; then
+        error "jq添加回落限速失败，请查看$LOG_FILE / jq failed to add fallback rate limit. Check $LOG_FILE."
+        return 1
+    fi
+}
+
+# Pick a fresh SNI via the standard probe flow, keeping the existing dest port.
+change_sni_in_existing_config() {
+    local old_dest=""
+    local dest_port=""
+    local new_dest=""
+
+    # Reset so pick_default_domain probes instead of early-returning on the old value.
+    domain=""
+    pick_default_domain
+
+    old_dest="$(jq -r '.inbounds[0].streamSettings.realitySettings.dest // empty' "$patch_jq_source")"
+    if [[ "$old_dest" =~ :([0-9]+)$ ]]; then
+        dest_port="${BASH_REMATCH[1]}"
+    fi
+    if [[ -z "$dest_port" ]]; then
+        dest_port=443
+    fi
+    new_dest="${domain}:${dest_port}"
+
+    if ! jq --arg server "$domain" --arg dest "$new_dest" \
+            '.inbounds[0].streamSettings.realitySettings.dest = $dest | .inbounds[0].streamSettings.realitySettings.serverNames = [$server]' \
+            "$patch_jq_source" > "$patch_tmp_out" 2>>"$LOG_FILE"; then
+        error "jq更换SNI失败，请查看$LOG_FILE / jq failed to change SNI. Check $LOG_FILE."
+        return 1
+    fi
+}
+
+patch_existing_xray_config() {
+    task_start "修补现有配置 / Patch existing config"
+
+    if ! resolve_jq_config_source; then
+        task_fail
+        exit 1
+    fi
+
+    if ! jq -e '.inbounds[0].streamSettings.realitySettings' "$patch_jq_source" >/dev/null 2>&1; then
+        task_fail
+        error "配置中没有REALITY设置，无法修补 / No REALITY settings found in config; cannot patch."
+        rm -f "$patch_cleanup"
+        exit 1
+    fi
+
+    patch_tmp_out="$(mktemp /tmp/nokey-config-patch.XXXXXX)" || {
+        task_fail
+        error "创建临时文件失败 / Failed to create temporary file."
+        exit 1
+    }
+
+    if [[ $add_limiter_mode -eq 1 ]]; then
+        add_limiter_to_existing_config || { task_fail; rm -f "$patch_tmp_out" "$patch_cleanup"; exit 1; }
+    elif [[ $change_sni_mode -eq 1 ]]; then
+        change_sni_in_existing_config || { task_fail; rm -f "$patch_tmp_out" "$patch_cleanup"; exit 1; }
+    fi
+
+    if ! mv "$patch_tmp_out" "$xray_config_path"; then
+        task_fail
+        error "写入配置文件失败: $xray_config_path / Failed to write config to $xray_config_path."
+        rm -f "$patch_cleanup"
+        exit 1
+    fi
+    chmod 644 "$xray_config_path"
+    [[ -n "$patch_cleanup" ]] && rm -f "$patch_cleanup"
+    task_done
+
+    restart_xray_service
+
+    # Regenerate links from the patched config so SNI/limiter changes are reflected.
+    initialize_ip_from_netstack
+    load_runtime_vars_from_existing_config
+    output_results
+}
+
+
 # ---- Realm functions ----
 
 uninstall_realm() {
@@ -1965,6 +2129,8 @@ show_help() {
   echo "  --mldsa65Verify=STRING  设置ML-DSA-65公钥 (默认: 自动生成) / Set ML-DSA-65 public key"
   echo "  --caddy            从运行的Caddy服务自动检测域名和端口 / Detect domain and port from Caddy service"
   echo "  --keepconfig       保留现有配置并从中生成输出链接 / Keep existing config.json and generate links from it"
+  echo "  --add-limiter      为现有配置添加REALITY回落限速(独立模式, 不能与其他参数连用) / Add REALITY fallback rate limit to existing config (standalone, no other flags)"
+  echo "  --change-sni       仅更换现有配置的REALITY SNI(独立模式, 不能与其他参数连用) / Re-randomize the REALITY SNI in existing config (standalone, no other flags)"
   echo "  --force            强制重装 / Force Reinstall"
    echo "  --realm            额外安装Realm转发代理 (与 --remote 搭配) / Also install Realm relay proxy alongside Xray/Sing-box (use with --remote)"
    echo "  --realm-only      仅安装Realm转发代理 (不安装Xray/Sing-box, 与 --remote 搭配) / Install Realm relay proxy only (without Xray/Sing-box, use with --remote)"
@@ -2396,6 +2562,12 @@ main() {
     echo -e "当前版本 / Version: ${cyan}${SCRIPT_VERSION}${none} " | tee -a "$LOG_FILE"
 
     check_root
+
+    if [[ $add_limiter_mode -eq 1 || $change_sni_mode -eq 1 ]]; then
+        patch_existing_xray_config
+        info "补丁完成 / Patch complete."
+        exit 0
+    fi
 
     if [[ $remove_mode -eq 1 ]]; then
         remove_alias

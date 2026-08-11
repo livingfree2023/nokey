@@ -422,4 +422,172 @@ else
 fi
 rm -rf "$share_dir"
 
+# Test 29: parse_args --add-limiter sets add_limiter_mode (standalone)
+if (
+  arg_count=0
+  add_limiter_mode=0
+  parse_args --add-limiter
+  [[ "$add_limiter_mode" -eq 1 ]]
+); then
+  pass "parse_args --add-limiter"
+else
+  fail "--add-limiter should set add_limiter_mode=1"
+fi
+
+# Test 30: parse_args --change-sni sets change_sni_mode (standalone)
+if (
+  arg_count=0
+  change_sni_mode=0
+  parse_args --change-sni
+  [[ "$change_sni_mode" -eq 1 ]]
+); then
+  pass "parse_args --change-sni"
+else
+  fail "--change-sni should set change_sni_mode=1"
+fi
+
+# Test 31: parse_args rejects --add-limiter combined with another flag
+if (
+  arg_count=0
+  parse_args --add-limiter --port=8443 >/dev/null 2>&1
+); then
+  fail "--add-limiter with another flag should be rejected"
+else
+  pass "--add-limiter rejects other flags"
+fi
+
+# Test 32: parse_args rejects --add-limiter and --change-sni together
+if (
+  arg_count=0
+  parse_args --add-limiter --change-sni >/dev/null 2>&1
+); then
+  fail "--add-limiter --change-sni together should be rejected"
+else
+  pass "patch modes reject each other"
+fi
+
+# Test 33: add_limiter_to_existing_config injects limitFallback objects with
+# randomized values in the documented 85%-115% band (106250-143750 / 212500-287500)
+if command -v jq >/dev/null 2>&1; then
+  patch_dir="$(mktemp -d)"
+  cat > "$patch_dir/config.json" <<'JSON'
+{
+  "inbounds": [{
+    "port": 443,
+    "protocol": "vless",
+    "settings": {"clients": [{"id": "test-uuid"}], "decryption": "none"},
+    "streamSettings": {
+      "network": "tcp",
+      "security": "reality",
+      "realitySettings": {
+        "show": false,
+        "dest": "www.amazon.com:443",
+        "xver": 0,
+        "serverNames": ["www.amazon.com"],
+        "privateKey": "PRIV",
+        "shortIds": ["abcd"]
+      }
+    }
+  }],
+  "outbounds": [{"protocol": "freedom"}]
+}
+JSON
+  if (
+    xray_config_path="$patch_dir/config.json"
+    patch_jq_source=""
+    patch_cleanup=""
+    resolve_jq_config_source
+    patch_tmp_out="$(mktemp)"
+    add_limiter_to_existing_config
+    up="$(jq -r '.inbounds[0].streamSettings.realitySettings.limitFallbackUpload.bytesPerSec' "$patch_tmp_out")"
+    up_burst="$(jq -r '.inbounds[0].streamSettings.realitySettings.limitFallbackUpload.burstBytesPerSec' "$patch_tmp_out")"
+    down="$(jq -r '.inbounds[0].streamSettings.realitySettings.limitFallbackDownload.bytesPerSec' "$patch_tmp_out")"
+    [[ "$up" -ge 106250 && "$up" -le 143750 ]]
+    [[ "$up_burst" -ge 212500 && "$up_burst" -le 287500 ]]
+    [[ "$down" -ge 106250 && "$down" -le 143750 ]]
+  ); then
+    pass "add-limiter injects fallback limiters"
+  else
+    fail "add_limiter_to_existing_config should add limitFallbackUpload/limitFallbackDownload"
+  fi
+  rm -rf "$patch_dir"
+else
+  pass "add-limiter jq test skipped (jq unavailable)"
+fi
+
+# Test 34: change_sni_in_existing_config swaps dest host + serverNames[0],
+# preserving the existing dest port
+if command -v jq >/dev/null 2>&1; then
+  patch_dir="$(mktemp -d)"
+  cat > "$patch_dir/config.json" <<'JSON'
+{
+  "inbounds": [{
+    "port": 443,
+    "protocol": "vless",
+    "settings": {"clients": [{"id": "test-uuid"}], "decryption": "none"},
+    "streamSettings": {
+      "network": "tcp",
+      "security": "reality",
+      "realitySettings": {
+        "show": false,
+        "dest": "www.amazon.com:8443",
+        "xver": 0,
+        "serverNames": ["www.amazon.com"],
+        "privateKey": "PRIV",
+        "shortIds": ["abcd"]
+      }
+    }
+  }],
+  "outbounds": [{"protocol": "freedom"}]
+}
+JSON
+  if (
+    xray_config_path="$patch_dir/config.json"
+    patch_jq_source=""
+    patch_cleanup=""
+    resolve_jq_config_source
+    patch_tmp_out="$(mktemp)"
+    pick_default_domain() { domain="www.nvidia.com"; }  # mock: fixed pick, no probe
+    change_sni_in_existing_config
+    dest="$(jq -r '.inbounds[0].streamSettings.realitySettings.dest' "$patch_tmp_out")"
+    server="$(jq -r '.inbounds[0].streamSettings.realitySettings.serverNames[0]' "$patch_tmp_out")"
+    [[ "$dest" == "www.nvidia.com:8443" ]]
+    [[ "$server" == "www.nvidia.com" ]]
+  ); then
+    pass "change-sni swaps host + serverName, keeps port"
+  else
+    fail "change_sni_in_existing_config should swap dest host and serverNames[0] while preserving port"
+  fi
+  rm -rf "$patch_dir"
+else
+  pass "change-sni jq test skipped (jq unavailable)"
+fi
+
+# Test 35: resolve_jq_config_source strips JSONC comments into a parseable temp copy
+if command -v jq >/dev/null 2>&1; then
+  patch_dir="$(mktemp -d)"
+  cat > "$patch_dir/config.json" <<'JSON'
+{
+  // comment line
+  "inbounds": []
+}
+JSON
+  if (
+    xray_config_path="$patch_dir/config.json"
+    patch_jq_source=""
+    patch_cleanup=""
+    resolve_jq_config_source
+    [[ -n "$patch_jq_source" && "$patch_jq_source" != "$xray_config_path" ]]
+    jq empty "$patch_jq_source"
+    rm -f "$patch_cleanup"
+  ); then
+    pass "resolve_jq_config_source strips JSONC"
+  else
+    fail "resolve_jq_config_source should produce a parseable stripped copy for JSONC configs"
+  fi
+  rm -rf "$patch_dir"
+else
+  pass "jsonc resolution test skipped (jq unavailable)"
+fi
+
 echo "All tests passed."

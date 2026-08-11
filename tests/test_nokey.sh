@@ -324,12 +324,12 @@ fi
 # Test 24: pick_default_domain picks the first feasible candidate, skipping failures
 if (
   probe_reality_target() {
-    [[ "$1" == "www.microsoft.com" ]] && return 0
+    [[ "$1" == "www.amazon.com" ]] && return 0
     return 1
   }
   domain=""
   pick_default_domain >/dev/null 2>&1
-  [[ "$domain" == "www.microsoft.com" ]]
+  [[ "$domain" == "www.amazon.com" ]]
 ); then
   pass "picker selects first feasible candidate"
 else

@@ -2,16 +2,15 @@
 
 # Constants and Configuration
 
-readonly SCRIPT_VERSION="2026.16" 
+readonly SCRIPT_VERSION="2026.17" 
 readonly LOG_FILE="nokey.log"
 readonly URL_FILE="nokey.url"
 readonly DEFAULT_DOMAIN="www.amd.com"
 # REALITY target candidate pool for the automated SNI scan, mirroring 3x-ui's
 # REALITY Target Scanner defaults (https://github.com/MHSanaei/3x-ui,
-# internal/web/service/reality_scan.go). The first feasible candidate wins.
+# internal/web/service/reality_scan.go). Probing order is shuffled per run
+# (see pick_default_domain); the first feasible candidate wins.
 readonly REALITY_TARGET_CANDIDATES=(
-    "www.cloudflare.com"
-    "www.microsoft.com"
     "www.amazon.com"
     "aws.amazon.com"
     "www.samsung.com"
@@ -1478,8 +1477,18 @@ probe_reality_target() {
 pick_default_domain() {
     [[ -n $domain ]] && return 0
     local candidate
+    local shuffled=("${REALITY_TARGET_CANDIDATES[@]}")
+    local i j tmp
+    # Fisher-Yates shuffle so no two installs probe the same first SNI
+    # (avoid a fixed scan-order fingerprint across one-click deployments).
+    for ((i = ${#shuffled[@]} - 1; i > 0; i--)); do
+        j=$((RANDOM % (i + 1)))
+        tmp="${shuffled[i]}"
+        shuffled[i]="${shuffled[j]}"
+        shuffled[j]="$tmp"
+    done
     info "自动探测REALITY目标SNI / Auto-probing REALITY target SNI:"
-    for candidate in "${REALITY_TARGET_CANDIDATES[@]}"; do
+    for candidate in "${shuffled[@]}"; do
         if probe_reality_target "$candidate"; then
             domain="$candidate"
             info "  ${candidate} -> ${green}可用 / feasible${none} (TLS 1.3 + h2 验证通过 / verified, ${probe_latency_ms}ms)"
@@ -1603,6 +1612,12 @@ build_xray_config() {
     # info "用户UUID = ${cyan}${uuid}${none}" 
     # info "域名SNI = ${cyan}$domain${none}" 
 
+    # Randomize the REALITY fallback rate limit around 1 Mbps sustained / 2 Mbps
+    # burst (targets: 125000 / 250000 bytes-per-sec). Xray docs mandate
+    # randomization for one-click installers to avoid a fixed-rate fingerprint.
+    fallback_bytes_per_sec=$((125000 * (85 + RANDOM % 31) / 100))
+    fallback_burst_bytes_per_sec=$((250000 * (85 + RANDOM % 31) / 100))
+
     reality_template=$(cat <<-EOF
       { 
         "log": {
@@ -1633,7 +1648,17 @@ build_xray_config() {
                 "serverNames": ["${domain}"],
                 "privateKey": "${private_key}",
                 "mldsa65Seed": "${mldsa65Seed}",
-                "shortIds": ["${shortid}"]
+                "shortIds": ["${shortid}"],
+                "limitFallbackUpload": {
+                  "afterBytes": 0,
+                  "bytesPerSec": ${fallback_bytes_per_sec},
+                  "burstBytesPerSec": ${fallback_burst_bytes_per_sec}
+                },
+                "limitFallbackDownload": {
+                  "afterBytes": 0,
+                  "bytesPerSec": ${fallback_bytes_per_sec},
+                  "burstBytesPerSec": ${fallback_burst_bytes_per_sec}
+                }
               }
             },
             "sniffing": {

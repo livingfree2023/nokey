@@ -2,7 +2,7 @@
 
 # Constants and Configuration
 
-readonly SCRIPT_VERSION="2026.18" 
+readonly SCRIPT_VERSION="2026.19"
 readonly LOG_FILE="nokey.log"
 readonly URL_FILE="nokey.url"
 readonly DEFAULT_DOMAIN="www.amd.com"
@@ -50,11 +50,17 @@ keepconfig=0
 remove_mode=0
 add_limiter_mode=0
 change_sni_mode=0
+addsocks_mode=0
 arg_count=0
 xray_config_path="/usr/local/etc/xray/config.json"
 patch_jq_source=""
 patch_cleanup=""
 patch_tmp_out=""
+socks_port=""
+socks_username=""
+socks_password=""
+socks_inbound_json=""
+random_unused_port=""
 arg_port_set=0
 arg_domain_set=0
 arg_uuid_set=0
@@ -68,8 +74,11 @@ realm_only=0
 realm_remote=""
 realm_listen=""
 
-# Sing-box mode variable
+# --singbox installs alongside Xray; --singbox-only suppresses the Xray path.
 sing_box_mode=0
+sing_box_only=0
+# Output helpers use a separate context so the requested install mode stays immutable.
+result_sing_box_mode=0
 
 # Last REALITY probe latency in ms (set by probe_reality_target; read by pick_default_domain)
 probe_latency_ms=""
@@ -580,7 +589,8 @@ install_dependencies() {
     task_start "开始准备工作 / Starting Preparation"
 
     #todo: "qrencode" should be a flag controlled feature
-    local tools=("curl" "netstat")
+    # Callers may request mode-specific tools (for example jq for atomic JSON patches).
+    local tools=("curl" "netstat" "$@")
 
     declare -A os_package_command=(
         [apt]="apt install -y"
@@ -677,8 +687,8 @@ validate_keepconfig_conflicts() {
         return 0
     fi
 
-    if [[ $arg_port_set -eq 1 || $arg_domain_set -eq 1 || $arg_uuid_set -eq 1 || $arg_shortid_set -eq 1 || $arg_mldsa_set -eq 1 || $arg_mldsa65seed_set -eq 1 || $arg_mldsa65verify_set -eq 1 ]]; then
-        error "冲突：--keepconfig不能与--port/--domain/--uuid/--shortid/--mldsa/--mldsa65Seed/--mldsa65Verify同时使用 / Conflict: --keepconfig cannot be used with --port/--domain/--uuid/--shortid/--mldsa/--mldsa65Seed/--mldsa65Verify."
+    if [[ "$arg_port_set" -eq 1 || "$arg_domain_set" -eq 1 || "$arg_uuid_set" -eq 1 || "$arg_shortid_set" -eq 1 || "$arg_mldsa_set" -eq 1 || "$arg_mldsa65seed_set" -eq 1 || "$arg_mldsa65verify_set" -eq 1 || "$addsocks_mode" -eq 1 ]]; then
+        error "冲突：--keepconfig不能与配置参数或--addsocks同时使用 / Conflict: --keepconfig cannot be used with config arguments or --addsocks."
         error "使用--keepconfig时，所有运行参数将从/usr/local/etc/xray/config.json读取 / When --keepconfig is set, all runtime values are loaded from /usr/local/etc/xray/config.json."
         exit 1
     fi
@@ -698,6 +708,21 @@ validate_patch_mode_conflicts() {
     if [[ $arg_count -gt 1 ]]; then
         error "冲突：--add-limiter/--change-sni是独立补丁模式，不能与其他参数同时使用 / Conflict: --add-limiter/--change-sni are standalone patch modes and cannot be combined with any other flag."
         exit 1
+    fi
+}
+
+validate_addsocks_conflicts() {
+    if [[ "$addsocks_mode" -eq 1 && "$arg_count" -gt 1 ]]; then
+        error "冲突：--addsocks是独立模式，不能与其他参数同时使用 / Conflict: --addsocks is a standalone mode and cannot be combined with other flags."
+        exit 1
+    fi
+}
+
+xray_service_is_active() {
+    if [ "${ID:-}" = "alpine" ] || [ "${ID_LIKE:-}" = "alpine" ]; then
+        rc-service "$SERVICE_NAME_ALPINE" status >/dev/null 2>&1
+    else
+        systemctl is-active --quiet "$SERVICE_NAME"
     fi
 }
 
@@ -977,7 +1002,12 @@ install_singbox() {
         if is_port_reusable 443 sing-box "$SINGBOX_SERVICE_NAME" "$SINGBOX_SERVICE_NAME_ALPINE"; then
             port=443
         else
-            port=$(shuf -i 10000-60000 -n 1 2>/dev/null || echo $((RANDOM % 50001 + 10000)))
+            if ! select_random_unused_port; then
+                task_fail
+                error "没有找到可用的Sing-box端口 / Could not find an unused Sing-box port."
+                exit 1
+            fi
+            port="$random_unused_port"
         fi
         log_info "使用端口: $port"
     fi
@@ -1358,6 +1388,7 @@ parse_args() {
             ;;
         --singbox-only)
             sing_box_mode=1
+            sing_box_only=1
             ;;
         --remote=*)
             realm_remote="${arg#*=}"
@@ -1381,6 +1412,9 @@ parse_args() {
         --change-sni)
           change_sni_mode=1
           ;;
+        --addsocks)
+          addsocks_mode=1
+          ;;
         --dry-run)
           dry_run=1
           ;;
@@ -1393,6 +1427,7 @@ parse_args() {
 
     validate_keepconfig_conflicts
     validate_patch_mode_conflicts
+    validate_addsocks_conflicts
 
      if [[ $realm_mode -eq 1 ]]; then
          if [[ -z "$realm_remote" ]]; then
@@ -1407,11 +1442,6 @@ parse_args() {
          fi
      fi
      
-     # Validate sing-box mode (uses same --port, --uuid, --domain as xray)
-     if [[ $sing_box_mode -eq 1 ]]; then
-         :
-     fi
-
 }
 
 
@@ -1675,6 +1705,7 @@ build_xray_config() {
               "security": "reality",
               "realitySettings": {
                 "show": false,
+                "minClientVer": "0.0.0",
                 "dest": "${domain}:${reality_dest_port}",
                 "xver": 0,
                 "serverNames": ["${domain}"],
@@ -1698,7 +1729,8 @@ build_xray_config() {
               "destOverride": ["http", "tls", "quic"],
               "routeOnly": true
             }
-          }
+          }${socks_inbound_json:+,
+${socks_inbound_json}}
         ],
         "outbounds": [
           {
@@ -1744,9 +1776,10 @@ EOF
     if [[ $mldsa_enabled != 1 ]]; then
       reality_template=$(echo "$reality_template" | sed '/"mldsa65Seed":/d')
     fi
-    task_start "快好了，手搓 / Configuring /usr/local/etc/xray/config.json"
-    
-    config_path="/usr/local/etc/xray/config.json"
+    local config_path="$xray_config_path"
+    local config_dir=""
+    task_start "快好了，手搓 / Configuring $config_path"
+
     config_dir=$(dirname "$config_path")
 
     if [[ ! -d "$config_dir" ]]; then
@@ -1793,13 +1826,18 @@ configure_xray() {
     else
         initialize_variables
         generate_crypto
+        if [[ "$addsocks_mode" -eq 1 ]]; then
+            task_start "生成SOCKS5入站 / Generate SOCKS5 inbound"
+            prepare_socks_inbound || { task_fail; exit 1; }
+            task_done_with_info "port=${socks_port}, user=${socks_username}"
+        fi
         build_xray_config
     fi
     restart_xray_service
 }
 
 
-# ---- Patch modes (--add-limiter / --change-sni) ----
+# ---- Patch modes (--add-limiter / --change-sni / --addsocks) ----
 
 # Resolve the jq-parseable view of the existing config: the config itself when
 # it is pure JSON, or a comment-stripped temp copy otherwise. Sets
@@ -1810,7 +1848,7 @@ resolve_jq_config_source() {
     patch_jq_source=""
     patch_cleanup=""
     if ! command -v jq >/dev/null 2>&1; then
-        error "--add-limiter/--change-sni需要jq，请先安装jq / Patch modes require jq. Please install jq first: apt install -y jq"
+        error "配置补丁模式需要jq，请先安装jq / Config patch modes require jq. Please install jq first: apt install -y jq"
         return 1
     fi
     if [[ ! -f "$config_path" ]]; then
@@ -1885,7 +1923,128 @@ change_sni_in_existing_config() {
     fi
 }
 
+random_hex() {
+    local byte_count="$1"
+    od -An -N "$byte_count" -tx1 /dev/urandom | tr -d '[:space:]'
+}
+
+is_tcp_port_unused() {
+    local check_port="$1"
+
+    if command -v ss >/dev/null 2>&1; then
+        ! ss -ltn 2>/dev/null | awk -v port=":${check_port}" '$4 ~ port "$" { found=1 } END { exit !found }'
+    elif command -v netstat >/dev/null 2>&1; then
+        ! netstat -ltn 2>/dev/null | awk -v port=":${check_port}" '$4 ~ port "$" { found=1 } END { exit !found }'
+    else
+        ! (echo > /dev/tcp/127.0.0.1/"$check_port") >/dev/null 2>&1
+    fi
+}
+
+select_random_unused_port() {
+    local config_source="${1:-}"
+    local excluded_port="${2:-}"
+    local candidate=""
+    local attempt=0
+
+    random_unused_port=""
+    while [[ "$attempt" -lt 1000 ]]; do
+        candidate=$((10000 + (RANDOM * 32768 + RANDOM) % 50001))
+        attempt=$((attempt + 1))
+        [[ -n "$excluded_port" && "$candidate" == "$excluded_port" ]] && continue
+        if [[ -n "$config_source" ]] && jq -e --argjson port "$candidate" '.inbounds[]? | select(.port == $port)' "$config_source" >/dev/null 2>&1; then
+            continue
+        fi
+        if is_tcp_port_unused "$candidate"; then
+            random_unused_port="$candidate"
+            return 0
+        fi
+    done
+    return 1
+}
+
+prepare_socks_inbound() {
+    local config_source="${1:-}"
+    local socks_listen="0.0.0.0"
+
+    if [[ "${netstack:-4}" == "6" ]]; then
+        socks_listen="::"
+    fi
+
+    socks_username="nokey$(random_hex 4)"
+    socks_password="$(random_hex 12)"
+    if [[ -z "$socks_username" || -z "$socks_password" ]]; then
+        error "生成SOCKS凭据失败 / Failed to generate SOCKS credentials."
+        return 1
+    fi
+
+    # Avoid both existing config ports and currently listening sockets.
+    if ! select_random_unused_port "$config_source" "${port:-}"; then
+        error "没有找到可用的SOCKS端口 / Could not find an unused SOCKS port."
+        return 1
+    fi
+    socks_port="$random_unused_port"
+
+    # Xray names password-auth entries "users" (Sing-box uses different schema names).
+    socks_inbound_json=$(cat <<-EOF
+          {
+            "tag": "nokey-socks-${socks_port}",
+            "listen": "${socks_listen}",
+            "port": ${socks_port},
+            "protocol": "socks",
+            "settings": {
+              "auth": "password",
+              "users": [
+                {
+                  "user": "${socks_username}",
+                  "pass": "${socks_password}"
+                }
+              ],
+              "udp": true
+            },
+            "sniffing": {
+              "enabled": true,
+              "destOverride": ["http", "tls", "quic"]
+            }
+          }
+EOF
+    )
+}
+
+add_socks_to_existing_config() {
+    if ! prepare_socks_inbound "$patch_jq_source"; then
+        return 1
+    fi
+    if ! jq --argjson inbound "$socks_inbound_json" '.inbounds += [$inbound]' \
+            "$patch_jq_source" > "$patch_tmp_out" 2>>"$LOG_FILE"; then
+        error "jq添加SOCKS入站失败，请查看$LOG_FILE / jq failed to add the SOCKS inbound. Check $LOG_FILE."
+        return 1
+    fi
+}
+
+output_socks_proxy() {
+    local proxy_host="$ip"
+    local proxy_url=""
+    local curl_command=""
+
+    if [[ "$proxy_host" == *:* && "$proxy_host" != \[*\] ]]; then
+        proxy_host="[$proxy_host]"
+    fi
+    proxy_url="socks5h://${socks_username}:${socks_password}@${proxy_host}:${socks_port}"
+    curl_command="curl --proxy '${proxy_url}' https://ipinfo.io"
+
+    info "SOCKS5代理 / SOCKS5 Proxy:"
+    info "${magenta}${proxy_url}${none}"
+    info "SOCKS5测试命令 / SOCKS5 test command:"
+    info "${cyan}${curl_command}${none}"
+    echo "$proxy_url" >> "$URL_FILE"
+    echo "$curl_command" >> "$URL_FILE"
+}
+
 patch_existing_xray_config() {
+    if [[ "$addsocks_mode" -eq 1 ]]; then
+        initialize_ip_from_netstack
+    fi
+
     task_start "修补现有配置 / Patch existing config"
 
     if ! resolve_jq_config_source; then
@@ -1893,7 +2052,7 @@ patch_existing_xray_config() {
         exit 1
     fi
 
-    if ! jq -e '.inbounds[0].streamSettings.realitySettings' "$patch_jq_source" >/dev/null 2>&1; then
+    if [[ "$addsocks_mode" -ne 1 ]] && ! jq -e '.inbounds[0].streamSettings.realitySettings' "$patch_jq_source" >/dev/null 2>&1; then
         task_fail
         error "配置中没有REALITY设置，无法修补 / No REALITY settings found in config; cannot patch."
         rm -f "$patch_cleanup"
@@ -1906,10 +2065,12 @@ patch_existing_xray_config() {
         exit 1
     }
 
-    if [[ $add_limiter_mode -eq 1 ]]; then
+    if [[ "$add_limiter_mode" -eq 1 ]]; then
         add_limiter_to_existing_config || { task_fail; rm -f "$patch_tmp_out" "$patch_cleanup"; exit 1; }
-    elif [[ $change_sni_mode -eq 1 ]]; then
+    elif [[ "$change_sni_mode" -eq 1 ]]; then
         change_sni_in_existing_config || { task_fail; rm -f "$patch_tmp_out" "$patch_cleanup"; exit 1; }
+    elif [[ "$addsocks_mode" -eq 1 ]]; then
+        add_socks_to_existing_config || { task_fail; rm -f "$patch_tmp_out" "$patch_cleanup"; exit 1; }
     fi
 
     if ! mv "$patch_tmp_out" "$xray_config_path"; then
@@ -1923,6 +2084,11 @@ patch_existing_xray_config() {
     task_done
 
     restart_xray_service
+
+    if [[ "$addsocks_mode" -eq 1 ]]; then
+        output_socks_proxy
+        return 0
+    fi
 
     # Regenerate links from the patched config so SNI/limiter changes are reflected.
     initialize_ip_from_netstack
@@ -2131,10 +2297,11 @@ show_help() {
   echo "  --keepconfig       保留现有配置并从中生成输出链接 / Keep existing config.json and generate links from it"
   echo "  --add-limiter      为现有配置添加REALITY回落限速(独立模式, 不能与其他参数连用) / Add REALITY fallback rate limit to existing config (standalone, no other flags)"
   echo "  --change-sni       仅更换现有配置的REALITY SNI(独立模式, 不能与其他参数连用) / Re-randomize the REALITY SNI in existing config (standalone, no other flags)"
+  echo "  --addsocks         添加随机端口和凭据的SOCKS5入站；Xray运行时仅修补现有配置 / Add a SOCKS5 inbound with random port and credentials; patch only when Xray is running"
   echo "  --force            强制重装 / Force Reinstall"
    echo "  --realm            额外安装Realm转发代理 (与 --remote 搭配) / Also install Realm relay proxy alongside Xray/Sing-box (use with --remote)"
    echo "  --realm-only      仅安装Realm转发代理 (不安装Xray/Sing-box, 与 --remote 搭配) / Install Realm relay proxy only (without Xray/Sing-box, use with --remote)"
-   echo "  --singbox         安装Sing-box代替Xray (使用VLESS Reality Vision) / Install Sing-box instead of Xray (uses VLESS Reality Vision)"
+   echo "  --singbox         在Xray旁额外安装Sing-box / Install Sing-box alongside Xray"
    echo "  --singbox-only    仅安装Sing-box (不安装Xray, 使用VLESS Reality Vision) / Install Sing-box only (without Xray, uses VLESS Reality Vision)"
   echo "  --remote=ADDRESS   设置Realm远程地址 (必填, 格式 host:port) / Set Realm remote address (required, format host:port)"
   echo "  --listen=ADDRESS   设置Realm监听地址 (可选, 默认派生自远程端口) / Set Realm listen address (optional, defaults to remote port on any address)"
@@ -2199,9 +2366,14 @@ dry_run_preview() {
     fi
 
     # Handle sing-box mode in dry run
-    if [[ $sing_box_mode -eq 1 ]]; then
+    if [[ "$sing_box_mode" -eq 1 ]]; then
         info "${green}=== Sing-box (VLESS Reality Vision) ===${none}"
-        if [[ $realm_only -eq 1 ]]; then
+        if [[ "$sing_box_only" -eq 1 ]]; then
+            info "模式: 仅Sing-box (不安装Xray) / Mode: Sing-box only (no Xray)"
+        else
+            info "模式: Xray + Sing-box / Mode: Xray + Sing-box"
+        fi
+        if [[ "$realm_only" -eq 1 ]]; then
             info "跳过Sing-box安装: --realm-only 模式 / Skipping Sing-box: --realm-only mode"
             task_done
             return
@@ -2246,8 +2418,8 @@ dry_run_preview() {
         info ""
     fi
     
-    # Skip xray section when in sing-box mode
-    if [[ $sing_box_mode -eq 1 ]]; then
+    # --singbox-only skips Xray; --singbox previews both services.
+    if [[ "$sing_box_only" -eq 1 ]]; then
         task_done
         return
     fi
@@ -2333,8 +2505,8 @@ check_service_status() {
         return
     fi
 
-    # Check sing-box service if in sing-box mode
-    if [[ $sing_box_mode -eq 1 ]]; then
+    # Check the service whose connection details are about to be emitted.
+    if [[ "$result_sing_box_mode" -eq 1 ]]; then
         if [ "$ID" = "alpine" ] || [ "$ID_LIKE" = "alpine" ]; then
             if rc-service "$SINGBOX_SERVICE_NAME_ALPINE" status >> "$LOG_FILE" 2>&1; then
                 info "Sing-box服务运行中 / Sing-box is running"
@@ -2382,7 +2554,7 @@ check_service_status() {
 }
 
 generate_share_links() {
-    if [[ $sing_box_mode -eq 1 ]]; then
+    if [[ "$result_sing_box_mode" -eq 1 ]]; then
         local server_ip=$ip
         if [[ $netstack == "6" ]]; then
             server_ip="[$ip]"
@@ -2417,7 +2589,7 @@ generate_share_links() {
 }
 
 generate_clash_config() {
-    if [[ $sing_box_mode -eq 1 ]]; then
+    if [[ "$result_sing_box_mode" -eq 1 ]]; then
         local server_ip=$ip
         if [[ $netstack == "6" ]]; then
             server_ip=${ip:1:-1}
@@ -2517,13 +2689,13 @@ output_results() {
     
     echo "" | tee -a "$LOG_FILE"
     separator | tee -a "$LOG_FILE"
-    if [[ $sing_box_mode -eq 1 ]]; then
+    if [[ "$result_sing_box_mode" -eq 1 ]]; then
         echo -e "  ${green}✓${none} VLESS Reality Vision" | tee -a "$LOG_FILE"
     else
         echo -e "  ${green}✓${none} Xray VLESS Reality" | tee -a "$LOG_FILE"
     fi
     echo -e "  ${cyan}IP:Port${none} → ${ip}:${port}" | tee -a "$LOG_FILE"
-    if [[ $sing_box_mode -ne 1 ]] || [[ -n "$public_key" ]]; then
+    if [[ "$result_sing_box_mode" -ne 1 ]] || [[ -n "$public_key" ]]; then
         echo -e "  ${cyan}UUID${none} → ${uuid}" | tee -a "$LOG_FILE"
     fi
     separator | tee -a "$LOG_FILE"
@@ -2532,12 +2704,17 @@ output_results() {
     generate_share_links
     generate_clash_config
     generate_ipv6_variants
+    if [[ "$addsocks_mode" -eq 1 ]]; then
+        output_socks_proxy
+    fi
 }
 
 
 # Main function
 main() {
     SECONDS=0
+    local install_singbox_alongside=0
+    local xray_active=0
 
     if [ -f /etc/os-release ]; then
         # shellcheck disable=SC1091
@@ -2550,8 +2727,12 @@ main() {
     show_banner
     parse_args "$@"
 
+    if [[ "$sing_box_mode" -eq 1 && "$sing_box_only" -eq 0 ]]; then
+        install_singbox_alongside=1
+    fi
+
     # init_output_files must stay after parse_args: non-action flags exit above and must not truncate nokey.log/.url
-    if [[ $dry_run -eq 1 ]]; then
+    if [[ "$dry_run" -eq 1 ]]; then
         detect_network_interfaces
         initialize_ip_from_netstack
         dry_run_preview
@@ -2563,21 +2744,38 @@ main() {
 
     check_root
 
-    if [[ $add_limiter_mode -eq 1 || $change_sni_mode -eq 1 ]]; then
+    if [[ "$add_limiter_mode" -eq 1 || "$change_sni_mode" -eq 1 ]]; then
         patch_existing_xray_config
         info "补丁完成 / Patch complete."
         exit 0
     fi
 
-    if [[ $remove_mode -eq 1 ]]; then
+    if [[ "$addsocks_mode" -eq 1 ]]; then
+        if xray_service_is_active; then
+            xray_active=1
+        fi
+        if [[ "$xray_active" -eq 1 && ! -f "$xray_config_path" ]]; then
+            error "Xray正在运行但缺少配置文件: $xray_config_path / Xray is active but its config file is missing: $xray_config_path"
+            exit 1
+        fi
+        # Preserve any installed configuration, whether the service is active or stopped.
+        if [[ "$xray_active" -eq 1 || -f "$xray_config_path" ]]; then
+            install_dependencies jq
+            patch_existing_xray_config
+            info "SOCKS5入站添加完成 / SOCKS5 inbound added."
+            exit 0
+        fi
+    fi
+
+    if [[ "$remove_mode" -eq 1 ]]; then
         remove_alias
-        if [[ $realm_mode -eq 1 ]]; then
+        if [[ "$realm_mode" -eq 1 ]]; then
             uninstall_realm
         fi
-        if [[ $sing_box_mode -eq 1 ]]; then
+        if [[ "$sing_box_mode" -eq 1 ]]; then
             uninstall_singbox
         fi
-        if [[ $realm_only -ne 1 && $sing_box_mode -ne 1 ]]; then
+        if [[ "$realm_only" -ne 1 && "$sing_box_only" -ne 1 ]]; then
             uninstall_xray
         fi
         info "卸载完成 / Uninstallation complete ... [${green}OK${none}]"
@@ -2587,32 +2785,39 @@ main() {
     install_dependencies # the next function needs curl, in debian 9 curl is not shipped
     detect_network_interfaces
 
-    # Handle sing-box mode: install sing-box instead of xray
-    if [[ $sing_box_mode -eq 1 ]]; then
-        if [[ $realm_only -ne 1 ]]; then
-            initialize_ip_from_netstack
-            install_singbox
-            enable_bbr
-            add_alias_if_missing
-        fi
-    else
-        # Default xray mode
-        if [[ $realm_only -ne 1 ]]; then
+    if [[ "$realm_only" -ne 1 ]]; then
+        # Default and --singbox modes install Xray. --singbox-only skips it.
+        if [[ "$sing_box_only" -ne 1 ]]; then
             install_xray
             configure_xray
-            enable_bbr
-            add_alias_if_missing
+
+            # Emit Xray results before Sing-box replaces the shared runtime vars.
+            if [[ "$install_singbox_alongside" -eq 1 ]]; then
+                result_sing_box_mode=0
+                output_results
+                port=""
+                initialize_ip_from_netstack
+            fi
         fi
+
+        if [[ "$sing_box_mode" -eq 1 ]]; then
+            initialize_ip_from_netstack
+            install_singbox
+        fi
+
+        enable_bbr
+        add_alias_if_missing
     fi
 
     # Handle realm installation (can be combined with either xray or sing-box)
-    if [[ $realm_mode -eq 1 ]]; then
+    if [[ "$realm_mode" -eq 1 ]]; then
         initialize_ip_from_netstack
         install_realm
         configure_realm
         restart_realm_service
     fi
 
+    result_sing_box_mode="$sing_box_mode"
     output_results
     info "总用时 / Elapsed Time:  ${green}$SECONDS 秒${none}"
     # info "日志文件 / Log File:  ${green}$LOG_FILE${none}"

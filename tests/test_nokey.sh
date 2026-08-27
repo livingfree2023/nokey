@@ -590,4 +590,220 @@ else
   pass "jsonc resolution test skipped (jq unavailable)"
 fi
 
+# Test 36: parse_args accepts --addsocks as an Xray feature flag
+if (
+  arg_count=0
+  addsocks_mode=0
+  parse_args --addsocks
+  [[ "$addsocks_mode" -eq 1 ]]
+); then
+  pass "parse_args --addsocks"
+else
+  fail "--addsocks should set addsocks_mode=1"
+fi
+
+if (
+  arg_count=0
+  addsocks_mode=0
+  parse_args --addsocks --netstack=6 >/dev/null 2>&1
+); then
+  fail "--addsocks with another flag should be rejected"
+else
+  pass "--addsocks rejects other flags"
+fi
+
+# Test 37: SOCKS generation creates random URL-safe credentials and valid Xray JSON
+if command -v jq >/dev/null 2>&1; then
+  if (
+    port=443
+    netstack=6
+    socks_port=""
+    socks_username=""
+    socks_password=""
+    is_tcp_port_unused() { return 0; }
+    prepare_socks_inbound
+    [[ "$socks_port" -ge 10000 && "$socks_port" -le 60000 ]]
+    [[ "$socks_port" != "$port" ]]
+    [[ "$socks_username" =~ ^nokey[0-9a-f]{8}$ ]]
+    [[ "$socks_password" =~ ^[0-9a-f]{24}$ ]]
+    jq -e '.protocol == "socks" and .settings.auth == "password" and (.settings.users | length == 1)' <<< "$socks_inbound_json" >/dev/null
+    [[ "$(jq -r '.listen' <<< "$socks_inbound_json")" == "::" ]]
+  ); then
+    pass "SOCKS inbound generation"
+  else
+    fail "prepare_socks_inbound should create valid random SOCKS settings"
+  fi
+
+  # Test 38: patching appends the SOCKS inbound without changing existing inbounds
+  socks_patch_dir="$(mktemp -d)"
+  cat > "$socks_patch_dir/config.json" <<'JSON'
+{
+  "inbounds": [{"tag": "existing", "port": 443, "protocol": "vless"}],
+  "outbounds": [{"protocol": "freedom", "tag": "direct"}]
+}
+JSON
+  if (
+    port=""
+    patch_jq_source="$socks_patch_dir/config.json"
+    patch_tmp_out="$socks_patch_dir/patched.json"
+    socks_port=""
+    is_tcp_port_unused() { return 0; }
+    add_socks_to_existing_config
+    [[ "$(jq -r '.inbounds[0].tag' "$patch_tmp_out")" == "existing" ]]
+    [[ "$(jq -r '.inbounds[0].port' "$patch_tmp_out")" == "443" ]]
+    [[ "$(jq -r '.inbounds[1].protocol' "$patch_tmp_out")" == "socks" ]]
+    [[ "$(jq -r '.outbounds[0].tag' "$patch_tmp_out")" == "direct" ]]
+  ); then
+    pass "--addsocks preserves existing config entries"
+  else
+    fail "add_socks_to_existing_config should only append one inbound"
+  fi
+  rm -rf "$socks_patch_dir"
+else
+  pass "SOCKS jq tests skipped (jq unavailable)"
+fi
+
+# Test 39: SOCKS output includes the proxy URL and ipinfo curl command in nokey.url
+socks_output_dir="$(mktemp -d)"
+if (
+  cd "$socks_output_dir" || exit 1
+  ip="2001:db8::50"
+  socks_port=23456
+  socks_username="nokeyuser"
+  socks_password="secret"
+  output_socks_proxy >/dev/null
+  grep -qF "socks5h://nokeyuser:secret@[2001:db8::50]:23456" "$URL_FILE"
+  grep -qF "curl --proxy 'socks5h://nokeyuser:secret@[2001:db8::50]:23456' https://ipinfo.io" "$URL_FILE"
+); then
+  pass "SOCKS proxy output"
+else
+  fail "output_socks_proxy should write the proxy and ipinfo curl command"
+fi
+rm -rf "$socks_output_dir"
+
+# Test 40: the standalone patch path supports non-REALITY Xray configs
+if command -v jq >/dev/null 2>&1; then
+  socks_mode_dir="$(mktemp -d)"
+  cat > "$socks_mode_dir/config.json" <<'JSON'
+{
+  "inbounds": [{"tag": "api", "port": 8080, "protocol": "dokodemo-door"}],
+  "outbounds": [{"tag": "direct", "protocol": "freedom"}]
+}
+JSON
+  if (
+    xray_config_path="$socks_mode_dir/config.json"
+    addsocks_mode=1
+    add_limiter_mode=0
+    change_sni_mode=0
+    patch_jq_source=""
+    patch_cleanup=""
+    patch_tmp_out=""
+    port=""
+    socks_port=""
+    is_tcp_port_unused() { return 0; }
+    restart_xray_service() { :; }
+    initialize_ip_from_netstack() { ip="198.51.100.80"; }
+    output_socks_proxy() { :; }
+    patch_existing_xray_config >/dev/null
+    [[ "$(jq -r '.inbounds[0].tag' "$xray_config_path")" == "api" ]]
+    [[ "$(jq -r '.inbounds[1].protocol' "$xray_config_path")" == "socks" ]]
+  ); then
+    pass "standalone --addsocks supports generic Xray config"
+  else
+    fail "standalone --addsocks should not require a REALITY inbound"
+  fi
+  rm -rf "$socks_mode_dir"
+else
+  pass "standalone SOCKS patch test skipped (jq unavailable)"
+fi
+
+# Test 41: a fresh Xray config includes the generated SOCKS inbound
+if command -v jq >/dev/null 2>&1; then
+  socks_build_dir="$(mktemp -d)"
+  if (
+    xray_config_path="$socks_build_dir/config.json"
+    port=443
+    domain="example.com"
+    reality_dest_port=443
+    uuid="test-uuid"
+    private_key="test-private-key"
+    shortid="abcd1234"
+    mldsa_enabled=0
+    mldsa65Seed=""
+    socks_port=""
+    is_tcp_port_unused() { return 0; }
+    prepare_socks_inbound
+    build_xray_config >/dev/null
+    jq -e '.inbounds | length == 2' "$xray_config_path" >/dev/null
+    [[ "$(jq -r '.inbounds[0].protocol' "$xray_config_path")" == "vless" ]]
+    [[ "$(jq -r '.inbounds[0].streamSettings.realitySettings.minClientVer' "$xray_config_path")" == "0.0.0" ]]
+    [[ "$(jq -r '.inbounds[1].protocol' "$xray_config_path")" == "socks" ]]
+  ); then
+    pass "fresh Xray config includes SOCKS inbound"
+  else
+    fail "build_xray_config should emit valid JSON with VLESS and SOCKS inbounds"
+  fi
+  rm -rf "$socks_build_dir"
+else
+  pass "fresh SOCKS config test skipped (jq unavailable)"
+fi
+
+# Test 42: --singbox and --singbox-only select distinct installation modes
+if (
+  arg_count=0
+  sing_box_mode=0
+  sing_box_only=0
+  parse_args --singbox
+  [[ "$sing_box_mode" -eq 1 && "$sing_box_only" -eq 0 ]]
+); then
+  pass "--singbox selects combined mode"
+else
+  fail "--singbox should install Sing-box alongside Xray"
+fi
+
+if (
+  arg_count=0
+  sing_box_mode=0
+  sing_box_only=0
+  parse_args --singbox-only
+  [[ "$sing_box_mode" -eq 1 && "$sing_box_only" -eq 1 ]]
+); then
+  pass "--singbox-only selects standalone mode"
+else
+  fail "--singbox-only should skip Xray"
+fi
+
+# Test 43: dry-run reports both services for --singbox, but not for --singbox-only
+if (
+  ID="alpine"
+  ID_LIKE=""
+  realm_mode=0
+  realm_only=0
+  sing_box_mode=1
+  sing_box_only=0
+  preview="$(dry_run_preview 2>&1)"
+  [[ "$preview" == *"=== Sing-box"* ]]
+  [[ "$preview" == *"=== Xray"* ]]
+); then
+  pass "--singbox dry-run includes Xray and Sing-box"
+else
+  fail "--singbox dry-run should include both services"
+fi
+
+if (
+  ID="alpine"
+  ID_LIKE=""
+  realm_mode=0
+  realm_only=0
+  sing_box_mode=1
+  sing_box_only=1
+  preview="$(dry_run_preview 2>&1)"
+  [[ "$preview" == *"=== Sing-box"* ]]
+  [[ "$preview" != *"=== Xray"* ]]
+); then
+  pass "--singbox-only dry-run excludes Xray"
+else
+  fail "--singbox-only dry-run should exclude Xray"
+fi
+
 echo "All tests passed."

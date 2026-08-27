@@ -29,9 +29,11 @@
 10. 支持X25519
 11. 支持`--realm`模式安装Realm转发代理（用`--remote`指定目标地址，`--listen`可选）
 12. 支持`--realm-only`模式仅安装Realm（不安装Xray）
-13. 支持`--singbox`模式安装Sing-box代替Xray（使用VLESS Reality Vision）
+13. 支持`--singbox`模式同时安装Xray和Sing-box，或用`--singbox-only`仅安装Sing-box
 14. 自动探测可用的REALITY目标SNI（参考3x-ui的REALITY Target Scanner，验证TLS 1.3 + HTTP/2）
-15. 暂时想到这么多……
+15. 支持`--addsocks`为Xray添加带随机端口、用户名和密码的SOCKS5入站
+16. Xray REALITY配置使用`minClientVer: "0.0.0"`兼容旧版客户端
+17. 暂时想到这么多……
 
 > 已测试包括：ubuntu22/debian11/Rocky9.2/CentOS7.6/Fedora30/Alma9.2/alpine3.22，欢迎测试提issue或者报告成功结果
 
@@ -48,6 +50,26 @@ curl -fsSL -o /usr/local/bin/nokey https://raw.githubusercontent.com/livingfree2
 ```
 nokey
 ```
+
+### 为Xray添加SOCKS5入站
+```
+nokey --addsocks
+```
+
+`--addsocks`是独立模式，不能和其他参数同时使用：
+
+- 新机器没有Xray配置时，会安装Xray并同时生成SOCKS5入站。
+- 已有`/usr/local/etc/xray/config.json`时，只向`inbounds`追加SOCKS5配置，保留现有入站和出站；无论服务当前运行还是停止，最后都会重启Xray。
+- SOCKS端口、用户名和密码均自动随机生成。代理地址和下面这种测试命令会输出到终端并写入`nokey.url`：
+
+```
+socks5h://USERNAME:PASSWORD@SERVER_IP:PORT
+curl --proxy 'socks5h://USERNAME:PASSWORD@SERVER_IP:PORT' https://ipinfo.io
+```
+
+> SOCKS5本身不加密，不建议直接暴露在不可信公网。请配合防火墙限制来源地址，并妥善保存`nokey.url`和`nokey.log`中的凭据。
+
+> `minClientVer: "0.0.0"`允许旧版Xray客户端连接，但旧客户端的TLS指纹可能更容易被识别；这是为兼容性做出的明确取舍。
 
 ### 场景二：安装Xray + Realm（同时安装两者）
 ```
@@ -66,15 +88,15 @@ nokey --netstack=6 --realm --remote [2001:db8::1]:443
 nokey --realm-only --remote 1.2.3.4:443
 ```
 
-### 场景四：安装Sing-box代替Xray（VLESS Reality Vision）
+### 场景四：安装Xray + Sing-box（VLESS Reality Vision）
 ```
-# 安装Sing-box（代替Xray）
+# 同时安装Xray和Sing-box；两者自动使用不同的入站端口
 nokey --singbox
 
-# 安装Sing-box + Realm转发代理
+# 安装Xray + Sing-box + Realm转发代理
 nokey --singbox --realm --remote 1.2.3.4:443
 
-# 指定端口和UUID
+# 指定Xray端口和共用UUID；Sing-box端口仍自动选择以避免冲突
 nokey --singbox --port 12345 --uuid "your-uuid-here"
 
 # 指定SNI域名
@@ -82,6 +104,11 @@ nokey --singbox --domain www.example.com
 
 # 仅预览安装流程
 nokey --singbox --dry-run
+```
+
+### 场景五：仅安装Sing-box（不安装Xray）
+```
+nokey --singbox-only
 ```
 
 ### 其他 
@@ -111,9 +138,10 @@ nokey --dry-run
 ## 卸载
 
 ```
-nokey --remove              # 卸载Xray/Sing-box (如果有Realm也一起卸载)
+nokey --remove              # 卸载Xray（如果有Realm也一起卸载）
 nokey --realm-only --remove  # 仅卸载Realm
-nokey --singbox --remove     # 卸载Sing-box (如果有Realm也一起卸载)
+nokey --singbox --remove     # 卸载Xray和Sing-box（如果有Realm也一起卸载）
+nokey --singbox-only --remove # 仅卸载Sing-box
 ```
 
 

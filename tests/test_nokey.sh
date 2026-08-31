@@ -71,6 +71,38 @@ ID_LIKE="debian"
 [[ "$(resolve_os_family)" == "debian/systemd-compatible" ]] || fail "debian-like should map to debian/systemd-compatible"
 pass "os family helper"
 
+service_policy_dir="$(mktemp -d)"
+cat > "$service_policy_dir/openrc" <<'EOF'
+#!/sbin/openrc-run
+command="/usr/local/bin/example"
+command_background="yes"
+EOF
+configure_openrc_crash_restart "$service_policy_dir/openrc"
+configure_openrc_crash_restart "$service_policy_dir/openrc"
+[[ "$(grep -c '^supervisor=supervise-daemon$' "$service_policy_dir/openrc")" -eq 1 ]] || fail "OpenRC service should use supervise-daemon"
+[[ "$(grep -c '^respawn_delay=5$' "$service_policy_dir/openrc")" -eq 1 ]] || fail "OpenRC service should delay crash respawns"
+[[ "$(grep -c '^respawn_max=0$' "$service_policy_dir/openrc")" -eq 1 ]] || fail "OpenRC service should keep respawning after crashes"
+if grep -q '^command_background=' "$service_policy_dir/openrc"; then
+  fail "OpenRC supervised service should remain in the foreground"
+fi
+
+cat > "$service_policy_dir/systemd" <<'EOF'
+[Service]
+ExecStart=/usr/local/bin/example
+Restart=no
+RestartSec=30s
+
+[Install]
+WantedBy=multi-user.target
+EOF
+configure_systemd_crash_restart "$service_policy_dir/systemd"
+configure_systemd_crash_restart "$service_policy_dir/systemd"
+[[ "$(grep -c '^Restart=on-failure$' "$service_policy_dir/systemd")" -eq 1 ]] || fail "systemd service should restart after crashes"
+[[ "$(grep -c '^RestartSec=5s$' "$service_policy_dir/systemd")" -eq 1 ]] || fail "systemd service should delay crash restarts"
+[[ "$(sed -n '/^\[Service\]$/,/^\[Install\]$/p' "$service_policy_dir/systemd" | grep -c '^Restart=on-failure$')" -eq 1 ]] || fail "systemd restart policy should be in the Service section"
+rm -rf "$service_policy_dir"
+pass "service crash restart policies"
+
 # Test 7: dry-run output includes expected download and service lines
 ID="alpine"
 ID_LIKE=""

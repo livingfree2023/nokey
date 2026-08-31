@@ -191,6 +191,37 @@ resolve_os_family() {
     fi
 }
 
+configure_openrc_crash_restart() {
+    local service_file="$1"
+    local service_tmp="${service_file}.nokey"
+
+    sed -e '/^[[:space:]]*command_background=/d' \
+        -e '/^[[:space:]]*supervisor=/d' \
+        -e '/^[[:space:]]*respawn_delay=/d' \
+        -e '/^[[:space:]]*respawn_max=/d' \
+        "$service_file" > "$service_tmp" || return 1
+    {
+        echo ""
+        echo "supervisor=supervise-daemon"
+        echo "respawn_delay=5"
+        echo "respawn_max=0"
+    } >> "$service_tmp" || return 1
+    mv "$service_tmp" "$service_file"
+}
+
+configure_systemd_crash_restart() {
+    local service_file="$1"
+    local service_tmp="${service_file}.nokey"
+
+    sed -e '/^[[:space:]]*Restart=/d' \
+        -e '/^[[:space:]]*RestartSec=/d' \
+        -e '/^\[Install\]$/i\
+Restart=on-failure\
+RestartSec=5s' \
+        "$service_file" > "$service_tmp" || return 1
+    mv "$service_tmp" "$service_file"
+}
+
 # shellcheck disable=SC2119,SC2120  # $1 is an optional arch override (used by tests)
 resolve_singbox_arch_name() {
     case "${1:-$(uname -m)}" in
@@ -897,6 +928,7 @@ install_xray() {
             log_info "安装OpenRC服务 / Installing OpenRC service: /etc/init.d/${SERVICE_NAME_ALPINE}"
         log_verbose "Downloading service file: ${GITHUB_XRAY_RC_URL} -> ${xray_rc_tmp}"
         curl -fSL "${GITHUB_XRAY_RC_URL}" -o "${xray_rc_tmp}" >> "$LOG_FILE" 2>&1 || { task_fail; error "下载xray.rc失败 / Failed to download xray.rc"; exit 1; }
+        configure_openrc_crash_restart "${xray_rc_tmp}" >> "$LOG_FILE" 2>&1 || { task_fail; error "配置xray崩溃自动重启失败 / Failed to configure xray crash restart"; exit 1; }
         install -m 755 "${xray_rc_tmp}" /etc/init.d/"$SERVICE_NAME_ALPINE" >> "$LOG_FILE" 2>&1 || { task_fail; error "安装/etc/init.d/$SERVICE_NAME_ALPINE失败 / Failed to install /etc/init.d/$SERVICE_NAME_ALPINE"; exit 1; }
         rm -f "${xray_rc_tmp}" >> "$LOG_FILE" 2>&1
         log_verbose "Installed OpenRC service file from xray.rc"
@@ -912,6 +944,7 @@ install_xray() {
             -e '/\${temp_AmbientCapabilities}/d' \
             -e '/\${temp_NoNewPrivileges}/d' \
             "${xray_service_tmp}" > /etc/systemd/system/"$SERVICE_NAME" || { task_fail; error "写入/etc/systemd/system/$SERVICE_NAME失败 / Failed to write /etc/systemd/system/$SERVICE_NAME"; exit 1; }
+        configure_systemd_crash_restart /etc/systemd/system/"$SERVICE_NAME" >> "$LOG_FILE" 2>&1 || { task_fail; error "配置xray崩溃自动重启失败 / Failed to configure xray crash restart"; exit 1; }
         rm -f "${xray_service_tmp}" >> "$LOG_FILE" 2>&1
         log_verbose "Installed systemd service file from xray.service"
         systemctl daemon-reload >> "$LOG_FILE" 2>&1 || { task_fail; error "systemctl daemon-reload失败 / systemctl daemon-reload failed"; exit 1; }
@@ -1158,7 +1191,11 @@ EOF
             log_info "安装OpenRC服务 / Installing OpenRC service: /etc/init.d/${SINGBOX_SERVICE_NAME_ALPINE}"
             log_verbose "Downloading service file: ${GITHUB_SINGBOX_RC_URL} -> ${service_tmp}"
             if curl -fSL "${GITHUB_SINGBOX_RC_URL}" -o "${service_tmp}" >> "$LOG_FILE" 2>&1; then
-                install -m 755 "${service_tmp}" /etc/init.d/"$SINGBOX_SERVICE_NAME_ALPINE" >> "$LOG_FILE" 2>&1
+                if ! install -m 755 "${service_tmp}" /etc/init.d/"$SINGBOX_SERVICE_NAME_ALPINE" >> "$LOG_FILE" 2>&1; then
+                    task_fail
+                    error "安装sing-box OpenRC服务失败 / Failed to install sing-box OpenRC service"
+                    exit 1
+                fi
                 rm -f "${service_tmp}" >> "$LOG_FILE" 2>&1
                 log_verbose "Installed OpenRC service file from sing-box.rc"
                 rc-update add "$SINGBOX_SERVICE_NAME_ALPINE" >> "$LOG_FILE" 2>&1 || warn "添加sing-box开机自启失败 / Failed to add sing-box to startup"
@@ -1170,7 +1207,11 @@ EOF
             log_info "安装systemd服务 / Installing systemd service: /etc/systemd/system/${SINGBOX_SERVICE_NAME}"
             log_verbose "Downloading service file: ${GITHUB_SINGBOX_SERVICE_URL} -> ${service_tmp}"
             if curl -fSL "${GITHUB_SINGBOX_SERVICE_URL}" -o "${service_tmp}" >> "$LOG_FILE" 2>&1; then
-                cp "${service_tmp}" /etc/systemd/system/"$SINGBOX_SERVICE_NAME" || warn "写入/etc/systemd/system/$SINGBOX_SERVICE_NAME失败 / Failed to write $SINGBOX_SERVICE_NAME"
+                if ! cp "${service_tmp}" /etc/systemd/system/"$SINGBOX_SERVICE_NAME" >> "$LOG_FILE" 2>&1; then
+                    task_fail
+                    error "安装sing-box systemd服务失败 / Failed to install sing-box systemd service"
+                    exit 1
+                fi
                 rm -f "${service_tmp}" >> "$LOG_FILE" 2>&1
                 log_verbose "Installed systemd service file from sing-box.service"
                 systemctl daemon-reload >> "$LOG_FILE" 2>&1 || true
@@ -1182,6 +1223,13 @@ EOF
         fi
     else
         info "服务文件已存在，跳过服务安装 / Service file already exists, skipping service setup"
+    fi
+
+    if [ "$ID" = "alpine" ] || [ "$ID_LIKE" = "alpine" ]; then
+        configure_openrc_crash_restart /etc/init.d/"$SINGBOX_SERVICE_NAME_ALPINE" >> "$LOG_FILE" 2>&1 || { task_fail; error "配置sing-box崩溃自动重启失败 / Failed to configure sing-box crash restart"; exit 1; }
+    else
+        configure_systemd_crash_restart /etc/systemd/system/"$SINGBOX_SERVICE_NAME" >> "$LOG_FILE" 2>&1 || { task_fail; error "配置sing-box崩溃自动重启失败 / Failed to configure sing-box crash restart"; exit 1; }
+        systemctl daemon-reload >> "$LOG_FILE" 2>&1 || { task_fail; error "systemctl daemon-reload失败 / systemctl daemon-reload failed"; exit 1; }
     fi
     
     # Restart sing-box to pick up the new config
@@ -2154,6 +2202,7 @@ install_realm() {
         log_info "安装OpenRC服务 / Installing OpenRC service: /etc/init.d/${REALM_SERVICE_NAME_ALPINE}"
         log_verbose "Downloading service file: ${GITHUB_REALM_RC_URL} -> ${realm_rc_tmp}"
         curl -fSL "${GITHUB_REALM_RC_URL}" -o "${realm_rc_tmp}" >> "$LOG_FILE" 2>&1 || { task_fail; error "下载realm.rc失败 / Failed to download realm.rc"; exit 1; }
+        configure_openrc_crash_restart "${realm_rc_tmp}" >> "$LOG_FILE" 2>&1 || { task_fail; error "配置realm崩溃自动重启失败 / Failed to configure realm crash restart"; exit 1; }
         install -m 755 "${realm_rc_tmp}" /etc/init.d/"$REALM_SERVICE_NAME_ALPINE" >> "$LOG_FILE" 2>&1 || { task_fail; error "安装/etc/init.d/$REALM_SERVICE_NAME_ALPINE失败 / Failed to install /etc/init.d/$REALM_SERVICE_NAME_ALPINE"; exit 1; }
         rm -f "${realm_rc_tmp}" >> "$LOG_FILE" 2>&1
         log_verbose "Installed OpenRC service file from realm.rc"
@@ -2162,6 +2211,7 @@ install_realm() {
         log_info "安装systemd服务 / Installing systemd service: /etc/systemd/system/${REALM_SERVICE_NAME}"
         log_verbose "Downloading service file: ${GITHUB_REALM_SERVICE_URL} -> ${realm_service_tmp}"
         curl -fSL "${GITHUB_REALM_SERVICE_URL}" -o "${realm_service_tmp}" >> "$LOG_FILE" 2>&1 || { task_fail; error "下载realm.service失败 / Failed to download realm.service"; exit 1; }
+        configure_systemd_crash_restart "${realm_service_tmp}" >> "$LOG_FILE" 2>&1 || { task_fail; error "配置realm崩溃自动重启失败 / Failed to configure realm crash restart"; exit 1; }
         cp "${realm_service_tmp}" /etc/systemd/system/"$REALM_SERVICE_NAME" || { task_fail; error "写入/etc/systemd/system/$REALM_SERVICE_NAME失败 / Failed to write /etc/systemd/system/$REALM_SERVICE_NAME"; exit 1; }
         rm -f "${realm_service_tmp}" >> "$LOG_FILE" 2>&1
         log_verbose "Installed systemd service file from realm.service"

@@ -18,7 +18,6 @@ readonly REALITY_TARGET_CANDIDATES=(
     "www.amd.com"
     "www.intel.com"
     "www.sony.com"
-    "dl.google.com"
 )
 # Per-candidate probe timeout (seconds) for the SNI scan.
 readonly REALITY_SCAN_TIMEOUT=5

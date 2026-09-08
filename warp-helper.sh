@@ -59,7 +59,6 @@ fi
 
 # 提取字段（兼容顶层或 result 嵌套结构）
 ADDR_V4=$(echo "$RESP" | jq -r '.config.interface.addresses.v4 // .result.config.interface.addresses.v4')
-ADDR_V6=$(echo "$RESP" | jq -r '.config.interface.addresses.v6 // .result.config.interface.addresses.v6')
 PEER_PUB=$(echo "$RESP" | jq -r '.config.peers[0].public_key // .result.config.peers[0].public_key')
 PEER_EP=$(echo "$RESP" | jq -r '.config.peers[0].endpoint.host // .result.config.peers[0].endpoint.host')
 CLIENT_ID=$(echo "$RESP" | jq -r '.config.client_id // .result.config.client_id // empty')
@@ -87,16 +86,15 @@ XRAY_CONFIG="/usr/local/etc/xray/config.json"
 WARP_OUT_JSON=$(jq -n \
   --arg priv "$PRIV_KEY" \
   --arg v4 "${ADDR_V4}/32" \
-  --arg v6 "${ADDR_V6}/128" \
   --arg peer_pub "$PEER_PUB" \
   --arg peer_ep "$PEER_EP" \
   --argjson reserved "$RESERVED_JSON" \
   '{
     tag: "warp-out",
     protocol: "wireguard",
-    settings: {
+    settings: ({
       secretKey: $priv,
-      address: [$v4, $v6],
+      address: [$v4],
       peers: [
         {
           publicKey: $peer_pub,
@@ -105,7 +103,7 @@ WARP_OUT_JSON=$(jq -n \
         }
       ],
       mtu: 1280
-    } + (if $reserved != null then {reserved: $reserved} else {} end)
+    } + (if $reserved != null then {reserved: $reserved} else {} end))
   }')
 
 echo "$WARP_OUT_JSON"

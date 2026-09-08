@@ -81,8 +81,10 @@ elif [[ "$PEER_EP" != *":"* ]]; then
   PEER_EP="${PEER_EP}:2408"
 fi
 
-# 输出标准 Xray-core outbound JSON
-jq -n \
+XRAY_CONFIG="/usr/local/etc/xray/config.json"
+
+# 构造标准 Xray-core outbound JSON（WARP WireGuard 出口）
+WARP_OUT_JSON=$(jq -n \
   --arg priv "$PRIV_KEY" \
   --arg v4 "${ADDR_V4}/32" \
   --arg v6 "${ADDR_V6}/128" \
@@ -104,4 +106,72 @@ jq -n \
       ],
       mtu: 1280
     } + (if $reserved != null then {reserved: $reserved} else {} end)
-  }'
+  }')
+
+echo "$WARP_OUT_JSON"
+
+# 检查 Xray 配置文件是否存在
+if [ ! -f "$XRAY_CONFIG" ]; then
+  echo "错误: 找不到 Xray 配置文件 $XRAY_CONFIG，无法写入。" >&2
+  echo "提示: 请先通过 nokey 安装/生成配置后再运行本脚本。" >&2
+  exit 1
+fi
+
+if ! jq empty "$XRAY_CONFIG" >/dev/null 2>&1; then
+  echo "错误: Xray 配置文件 $XRAY_CONFIG 不是有效的 JSON。" >&2
+  exit 1
+fi
+
+# 构造要注入的 inbound（WARP SOCKS 入口）和两条 WARP 路由规则
+WARP_INBOUND_JSON=$(jq -n '{
+  tag: "warp-in-socks",
+  listen: "127.0.0.1",
+  port: 40000,
+  protocol: "socks",
+  settings: { auth: "noauth", udp: true }
+}')
+
+WARP_RULE_INBOUND_JSON=$(jq -n '{
+  type: "field",
+  inboundTag: ["warp-in-socks"],
+  outboundTag: "warp-out"
+}')
+
+WARP_RULE_DOMAIN_JSON=$(jq -n '{
+  type: "field",
+  domain: ["geosite:google", "geosite:youtube", "geosite:category-forums"],
+  outboundTag: "warp-out"
+}')
+
+# 将 warp-out / warp-in-socks 合并进配置（幂等：更新或创建 outbound/inbound）。
+# 路由规则仅在对应配置缺失时才追加，绝不覆盖/删除/并存用户已自定义的路由：
+#   1) 已有 inboundTag 含 warp-in-socks 的规则 → 不再追加默认入口规则
+#   2) 已有 domain 规则走向 warp-out → 不再追加默认域名规则
+PATCHED_JSON=$(jq \
+  --argjson outbound "$WARP_OUT_JSON" \
+  --argjson inbound "$WARP_INBOUND_JSON" \
+  --argjson rule_inbound "$WARP_RULE_INBOUND_JSON" \
+  --argjson rule_domain "$WARP_RULE_DOMAIN_JSON" \
+  '
+    .outbounds = ((.outbounds // []) | map(select(.tag != "warp-out")) | . + [$outbound])
+    | .inbounds = ((.inbounds // []) | map(select(.tag != "warp-in-socks")) | . + [$inbound])
+    | .routing.rules = ((.routing.rules // []) + (
+        (if any(.routing.rules[]?; (.inboundTag? // []) | index("warp-in-socks")) then [] else [$rule_inbound] end) +
+        (if any(.routing.rules[]?; (.domain? != null) and (.outboundTag? == "warp-out")) then [] else [$rule_domain] end)
+      ))
+  ' "$XRAY_CONFIG")
+
+# 校验合并结果仍为合法 JSON
+if ! jq empty >/dev/null 2>&1 <<<"$PATCHED_JSON"; then
+  echo "错误: 合并后的配置不是有效的 JSON，已中止，未修改原文件。" >&2
+  exit 1
+fi
+
+# 原子写入（临时文件 + mv），保留原权限
+TMP_FILE=$(mktemp)
+trap 'rm -f "$TMP_FILE"' EXIT
+printf '%s\n' "$PATCHED_JSON" > "$TMP_FILE"
+chmod --reference="$XRAY_CONFIG" "$TMP_FILE" 2>/dev/null || chmod 644 "$TMP_FILE"
+mv "$TMP_FILE" "$XRAY_CONFIG"
+
+echo "已更新 $XRAY_CONFIG (warp-out / warp-in-socks / 路由规则)。" >&2

@@ -1732,7 +1732,7 @@ build_xray_config() {
         "log": {
           "access": "/tmp/xray_access.log",
           "error": "/tmp/xray_error.log",
-          "loglevel": "warning"
+          "loglevel": "error"
         },
         "inbounds": [
           {
@@ -1787,6 +1787,18 @@ ${socks_inbound_json}}
             "tag": "direct"
           },
           {
+            "tag": "warp-out",
+            "protocol": "socks",
+            "settings": {
+                "servers": [
+                    {
+                        "address": "127.0.0.1",
+                        "port": 40000
+                    }
+                ]
+            }
+          },
+          {
             "protocol": "blackhole",
             "tag": "block"
           }
@@ -1803,6 +1815,25 @@ ${socks_inbound_json}}
         "routing": {
           "domainStrategy": "IPIfNonMatch",
           "rules": [
+        /* UNCOMMENT THIS BLOCK TO ENABLE WARP FOR CERTAIN DOMAINS */
+        /* warp-out is going to localhost:40000 created by wireproxy */
+        /* to install wireproxy and run the following and choose 12 wireproxy */
+        /* wget -N https://gitlab.com/fscarmen/warp/-/raw/main/menu.sh && bash menu.sh */
+        /*
+            {
+                "type": "field",
+                "domain": [
+                    "geosite:disney",
+                    "geosite:netflix",
+                    "geosite:youtube",
+                    "geosite:google",
+                    "geosite:category-ai-!cn",
+                    "geosite:category-media-!cn",
+                    "geosite:category-forums"
+                ],
+                "outboundTag": "warp-out"
+            }, 
+        */
             {
               "type": "field",
               "ip": ["geoip:private"],

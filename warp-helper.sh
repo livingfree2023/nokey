@@ -173,3 +173,25 @@ chmod --reference="$XRAY_CONFIG" "$TMP_FILE" 2>/dev/null || chmod 644 "$TMP_FILE
 mv "$TMP_FILE" "$XRAY_CONFIG"
 
 echo "已更新 $XRAY_CONFIG (warp-out / warp-in-socks / 路由规则)。" >&2
+
+# 重启 Xray 服务以应用新配置（区分 systemd / OpenRC-Alpine）
+ID=""
+ID_LIKE=""
+if [ -f /etc/os-release ]; then
+  # shellcheck disable=SC1091
+  . /etc/os-release
+fi
+if [ "$ID" = "alpine" ] || [ "$ID_LIKE" = "alpine" ]; then
+  echo "正在重启 xray (OpenRC) ..." >&2
+  if ! rc-service xray restart >/dev/null 2>&1; then
+    echo "错误: 重启 xray 服务失败。" >&2
+    exit 1
+  fi
+else
+  echo "正在重启 xray (systemd) ..." >&2
+  if ! systemctl restart xray.service >/dev/null 2>&1; then
+    echo "错误: 重启 xray 服务失败。" >&2
+    exit 1
+  fi
+fi
+echo "xray 服务已重启。" >&2

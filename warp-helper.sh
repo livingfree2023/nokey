@@ -104,5 +104,4 @@ jq -n \
       ],
       mtu: 1280
     } + (if $reserved != null then {reserved: $reserved} else {} end)
-  }
-
+  }'

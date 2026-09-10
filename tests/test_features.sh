@@ -39,6 +39,7 @@ grep -q 'Mihomo/Clash config' "$REPO_ROOT/singbox.sh"
 
 [[ -x "$REPO_ROOT/hysteria2.rc" ]]
 grep -q 'ExecStart=/usr/local/bin/hysteria server --config /etc/hysteria/config.yaml' "$REPO_ROOT/hysteria2.service"
+awk '/configure_openrc_crash_restart/{found=1} found && /chmod 755/{ok=1} END{exit !ok}' "$REPO_ROOT/hysteria2.sh"
 
 fixture_dir="$(mktemp -d)"
 trap 'rm -rf "$fixture_dir"' EXIT

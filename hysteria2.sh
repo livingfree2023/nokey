@@ -316,6 +316,7 @@ depend() { need net; }
 EOF
     chmod 755 "$destination"
     configure_openrc_crash_restart "$destination" || return 1
+    chmod 755 "$destination"
     rc-update add "$HYSTERIA_SERVICE_NAME_ALPINE" default >> "$LOG_FILE" 2>&1 || true
     rc-service "$HYSTERIA_SERVICE_NAME_ALPINE" restart >> "$LOG_FILE" 2>&1
 }

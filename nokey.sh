@@ -3,7 +3,7 @@
 
 # Constants and Configuration
 
-readonly SCRIPT_VERSION="2026.26"
+readonly SCRIPT_VERSION="2026.27"
 readonly LOG_FILE="nokey.log"
 readonly URL_FILE="nokey.url"
 readonly DEFAULT_DOMAIN="www.amd.com"
@@ -2858,6 +2858,11 @@ output_results() {
     generate_ipv6_variants
     if [[ "$addsocks_mode" -eq 1 ]]; then
         output_socks_proxy
+    fi
+    if [[ "$result_sing_box_mode" -eq 1 ]]; then
+        print_service_commands "$SINGBOX_SERVICE_NAME" "$SINGBOX_SERVICE_NAME_ALPINE"
+    else
+        print_service_commands "$SERVICE_NAME" "$SERVICE_NAME_ALPINE"
     fi
 }
 

@@ -276,6 +276,7 @@ main() {
     install_realm
     configure_realm
     restart_realm_service
+    print_service_commands "$REALM_SERVICE_NAME" "$REALM_SERVICE_NAME_ALPINE"
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]] || [[ -n "${BASH_EXECUTION_STRING:-}" ]]; then

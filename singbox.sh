@@ -465,6 +465,31 @@ output_results() {
     info "VLESS Reality share link:"
     echo "$link" | tee -a "$LOG_FILE"
     echo "$link" >> "$URL_FILE"
+
+    local mihomo_server="$server_ip"
+    [[ "$netstack" == "6" ]] && mihomo_server="${server_ip:1:-1}"
+    local mihomo_config
+    mihomo_config=$(cat <<-EOF
+proxies:
+  - name: ${current_hostname}
+    type: vless
+    server: ${mihomo_server}
+    port: ${port}
+    uuid: ${uuid}
+    flow: xtls-rprx-vision
+    network: tcp
+    tls: true
+    servername: ${domain}
+    client-fingerprint: chrome
+    reality-opts:
+      public-key: ${public_key}
+      short-id: ${shortid}
+EOF
+)
+    info "Mihomo/Clash config:"
+    echo "$mihomo_config" | tee -a "$LOG_FILE"
+    echo "$mihomo_config" >> "$URL_FILE"
+    print_service_commands "$SINGBOX_SERVICE_NAME" "$SINGBOX_SERVICE_NAME_ALPINE"
 }
 
 main() {

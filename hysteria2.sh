@@ -26,7 +26,7 @@ else
 fi
 
 domain=""
-port=443
+port=""
 password=""
 cert_path=""
 key_path=""
@@ -99,9 +99,26 @@ validate_args() {
         error "Invalid email: $acme_email"
         return 1
     fi
-    if ! [[ "$port" =~ ^[0-9]+$ ]] || (( port < 1 || port > 65535 )); then
-        error "Invalid port: $port"
-        return 1
+    if [[ -n "$port" ]]; then
+        if ! [[ "$port" =~ ^[0-9]+$ ]] || (( port < 1 || port > 65535 )); then
+            error "Invalid port: $port"
+            return 1
+        fi
+    else
+        local attempt=0
+        local candidate=""
+        while [[ "$attempt" -lt 1000 ]]; do
+            candidate=$((10000 + RANDOM % 50001))
+            if is_tcp_port_unused "$candidate"; then
+                port="$candidate"
+                break
+            fi
+            attempt=$((attempt + 1))
+        done
+        if [[ -z "$port" ]]; then
+            error "Could not find an unused Hysteria2 port"
+            return 1
+        fi
     fi
     if [[ -z "$password" ]]; then
         password="$(random_hex 16)"
@@ -360,6 +377,7 @@ write_share_urls() {
     printf 'Share URL: %s\n' "$share_url"
     info "Mihomo/Clash YAML saved to: $URL_FILE"
     cat "$URL_FILE"
+    print_service_commands "$HYSTERIA_SERVICE_NAME" "$HYSTERIA_SERVICE_NAME_ALPINE"
 }
 
 uninstall_hysteria() {

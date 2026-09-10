@@ -61,6 +61,15 @@ task_fail() {
     echo -e "[${red}FAILED${none}]" | tee -a "$LOG_FILE"
 }
 
+print_service_commands() {
+    local systemd_service="$1"
+    local openrc_service="$2"
+    info "Restart / 重启: systemctl restart ${systemd_service}"
+    info "Status / 状态: systemctl status ${systemd_service}"
+    info "Alpine restart / Alpine重启: rc-service ${openrc_service} restart"
+    info "Alpine status / Alpine状态: rc-service ${openrc_service} status"
+}
+
 log_verbose() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> "$LOG_FILE"
 }

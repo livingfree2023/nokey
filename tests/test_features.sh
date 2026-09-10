@@ -32,6 +32,7 @@ hysteria_acme_output="$(HYSTERIA_CF_TOKEN=test-token bash "$REPO_ROOT/hysteria2.
 [[ "$hysteria_acme_output" == *"built-in ACME DNS-01"* ]]
 grep -q 'cloudflare_api_token' "$REPO_ROOT/hysteria2.sh"
 grep -q 'type: dns' "$REPO_ROOT/hysteria2.sh"
+grep -q 'HYSTERIA_CF_TOKEN' "$REPO_ROOT/nokey.sh"
 
 [[ -x "$REPO_ROOT/hysteria2.rc" ]]
 grep -q 'ExecStart=/usr/local/bin/hysteria server --config /etc/hysteria/config.yaml' "$REPO_ROOT/hysteria2.service"

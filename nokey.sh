@@ -3,7 +3,7 @@
 
 # Constants and Configuration
 
-readonly SCRIPT_VERSION="2026.24"
+readonly SCRIPT_VERSION="2026.26"
 readonly LOG_FILE="nokey.log"
 readonly URL_FILE="nokey.url"
 readonly DEFAULT_DOMAIN="www.amd.com"
@@ -1511,6 +1511,8 @@ show_feature_menu() {
     local listen=""
     local acme_domain=""
     local cf_token=""
+    local hysteria_domain=""
+    local hysteria_cf_token=""
 
     if ! exec 3</dev/tty; then
         error "--menu requires an interactive terminal / --menu需要交互式终端"
@@ -1559,7 +1561,19 @@ show_feature_menu() {
                 unset CF_Token
                 break
                 ;;
-            8) run_feature_script hysteria2.sh; break ;;
+            8)
+                read -r -p "Hysteria2 domain: " hysteria_domain <&3
+                read -r -s -p "Cloudflare API token (optional, press Enter for certificate paths): " hysteria_cf_token <&3
+                echo
+                if [[ -n "$hysteria_cf_token" ]]; then
+                    export HYSTERIA_CF_TOKEN="$hysteria_cf_token"
+                else
+                    unset HYSTERIA_CF_TOKEN
+                fi
+                run_feature_script hysteria2.sh "--domain=$hysteria_domain"
+                unset HYSTERIA_CF_TOKEN
+                break
+                ;;
             9) break ;;
             *) warn "Invalid menu choice / 无效选择" ;;
         esac

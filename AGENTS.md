@@ -4,8 +4,9 @@
 
 Several one-shot Bash entrypoints sharing `nokey-common.sh`. `nokey.sh` keeps
 the default Xray VLESS + Reality + BBR installation behavior; Realm, Sing-box,
-SOCKS, WARP, and standalone BBR are separate feature entrypoints. All run from
-`curl | bash` or process substitution and must work on minimal environments
+SOCKS, WARP, standalone BBR, ACME certificates, and Hysteria2 are separate
+feature entrypoints. All run from `curl | bash` or process substitution and
+must work on minimal environments
 (Alpine Pods with 64MB RAM, busybox tools, OpenRC), Debian/Ubuntu, CentOS/Rocky,
 Fedora, AlmaLinux.
 
@@ -45,8 +46,8 @@ Fedora, AlmaLinux.
 ## Verification (always run before declaring done)
 
 ```bash
-for script in nokey.sh nokey-common.sh realm.sh singbox.sh xray-socks.sh xray-warp.sh bbr.sh; do bash -n "$script"; done
-shellcheck -x nokey.sh nokey-common.sh realm.sh singbox.sh xray-socks.sh xray-warp.sh bbr.sh tests/test_nokey.sh
+for script in nokey.sh nokey-common.sh realm.sh singbox.sh xray-socks.sh xray-warp.sh bbr.sh acme-cert.sh hysteria2.sh; do bash -n "$script"; done
+shellcheck -x nokey.sh nokey-common.sh realm.sh singbox.sh xray-socks.sh xray-warp.sh bbr.sh acme-cert.sh hysteria2.sh tests/test_nokey.sh tests/test_features.sh
 bash tests/test_nokey.sh
 bash tests/test_features.sh
 ```

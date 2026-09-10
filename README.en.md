@@ -29,7 +29,7 @@ Run a single command, sit back, and wait. No chatter, no fuss—super fast. Read
 8. Shows help with `--help`  
 9. Outputs only minimal steps—detailed logs saved to a file  
 10. Generates QR codes  
-11. `--menu` opens the Realm, SOCKS, WARP, Sing-box, and BBR feature menu
+11. `--menu` opens the Realm, SOCKS, WARP, Sing-box, BBR, acme.sh certificate, and Hysteria2 feature menu
 12. Feature implementations are separate scripts and can be run with one-liners
 13. Auto-probes a feasible REALITY target SNI (mirrors 3x-ui's REALITY Target Scanner; verifies TLS 1.3 + HTTP/2)
 14. Installs `jq` automatically before JSON-based SOCKS/WARP operations when missing
@@ -72,9 +72,13 @@ bash <(curl -fsSL https://raw.githubusercontent.com/livingfree2023/nokey/refs/he
 bash <(curl -fsSL https://raw.githubusercontent.com/livingfree2023/nokey/refs/heads/main/xray-warp.sh)
 bash <(curl -fsSL https://raw.githubusercontent.com/livingfree2023/nokey/refs/heads/main/singbox.sh)
 bash <(curl -fsSL https://raw.githubusercontent.com/livingfree2023/nokey/refs/heads/main/bbr.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/livingfree2023/nokey/refs/heads/main/acme-cert.sh) --domain=example.com
+bash <(curl -fsSL https://raw.githubusercontent.com/livingfree2023/nokey/refs/heads/main/hysteria2.sh) --domain=example.com
 ```
 
 Each entrypoint loads `nokey-common.sh`; JSON-based features install `jq` through the detected package manager when it is missing.
+
+The acme.sh menu entry uses Cloudflare DNS validation when a token is entered, otherwise it uses standalone HTTP-01 on port 80. Certificates are installed under `/etc/hysteria/`. Hysteria2 first detects certificates there and in `~/.acme.sh/`; if none are found, it asks for certificate and key paths. After the service is active, `nokey.url` contains a `hysteria2://` share URL and a Mihomo/Clash YAML proxy entry.
 
 ---
 

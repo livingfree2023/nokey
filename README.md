@@ -33,7 +33,7 @@
 14. 自动探测可用的REALITY目标SNI（参考3x-ui的REALITY Target Scanner，验证TLS 1.3 + HTTP/2）
 15. 支持`--addsocks`为Xray添加带随机端口、用户名和密码的SOCKS5入站
 16. Xray REALITY配置使用`minClientVer: "0.0.0"`兼容旧版客户端
-17. 使用`--menu`选择Realm、SOCKS、WARP、Sing-box和BBR等功能
+17. 使用`--menu`选择Realm、SOCKS、WARP、Sing-box、BBR、acme.sh证书和Hysteria2
 18. 缺少`jq`时，SOCKS和WARP功能会通过系统包管理器自动安装
 
 > 已测试包括：ubuntu22/debian11/Rocky9.2/CentOS7.6/Fedora30/Alma9.2/alpine3.22，欢迎测试提issue或者报告成功结果
@@ -64,9 +64,13 @@ bash <(curl -fsSL https://raw.githubusercontent.com/livingfree2023/nokey/refs/he
 bash <(curl -fsSL https://raw.githubusercontent.com/livingfree2023/nokey/refs/heads/main/xray-warp.sh)
 bash <(curl -fsSL https://raw.githubusercontent.com/livingfree2023/nokey/refs/heads/main/singbox.sh)
 bash <(curl -fsSL https://raw.githubusercontent.com/livingfree2023/nokey/refs/heads/main/bbr.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/livingfree2023/nokey/refs/heads/main/acme-cert.sh) --domain=example.com
+bash <(curl -fsSL https://raw.githubusercontent.com/livingfree2023/nokey/refs/heads/main/hysteria2.sh) --domain=example.com
 ```
 
 这些脚本会自动加载`nokey-common.sh`。需要JSON配置处理的功能会先检查并安装`jq`。
+
+菜单中的acme.sh功能使用Cloudflare DNS验证（输入API token时）或80端口HTTP验证，并把证书安装到`/etc/hysteria/`。Hysteria2会优先检测该目录和`~/.acme.sh/`中的证书；找不到时会提示输入证书和私钥路径。服务启动成功后，`nokey.url`会保存`hysteria2://`链接和Mihomo/Clash YAML配置。
 
 ### 场景一：只安装Xray（默认，不带任何参数）
 ```

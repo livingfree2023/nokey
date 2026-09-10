@@ -1,0 +1,14 @@
+#!/sbin/openrc-run
+
+name="hysteria2"
+description="Hysteria 2 Server"
+command="/usr/local/bin/hysteria"
+command_args="server --config /etc/hysteria/config.yaml"
+command_background=true
+pidfile="/run/${RC_SVCNAME}.pid"
+output_log="/var/log/${RC_SVCNAME}.log"
+error_log="/var/log/${RC_SVCNAME}.err"
+
+depend() {
+    need net
+}

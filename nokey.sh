@@ -3,7 +3,7 @@
 
 # Constants and Configuration
 
-readonly SCRIPT_VERSION="2026.21"
+readonly SCRIPT_VERSION="2026.22"
 readonly LOG_FILE="nokey.log"
 readonly URL_FILE="nokey.url"
 readonly DEFAULT_DOMAIN="www.amd.com"
@@ -1509,6 +1509,8 @@ show_feature_menu() {
     local choice=""
     local remote=""
     local listen=""
+    local acme_domain=""
+    local cf_token=""
 
     if ! exec 3</dev/tty; then
         error "--menu requires an interactive terminal / --menu需要交互式终端"
@@ -1524,7 +1526,9 @@ show_feature_menu() {
         echo "4) Configure Xray WARP"
         echo "5) Install Sing-box VLESS Reality"
         echo "6) Enable BBR"
-        echo "7) Exit"
+        echo "7) Get SSL certificate with acme.sh"
+        echo "8) Install Hysteria2 server"
+        echo "9) Exit"
         read -r -p "Select an option: " choice <&3 || break
         case "$choice" in
             1) run_feature_script nokey.sh; break ;;
@@ -1542,7 +1546,21 @@ show_feature_menu() {
             4) run_feature_script xray-warp.sh; break ;;
             5) run_feature_script singbox.sh; break ;;
             6) run_feature_script bbr.sh; break ;;
-            7) break ;;
+            7)
+                read -r -p "Certificate domain: " acme_domain <&3
+                read -r -s -p "Cloudflare API token (optional, press Enter for HTTP-01): " cf_token <&3
+                echo
+                if [[ -n "$cf_token" ]]; then
+                    export CF_Token="$cf_token"
+                else
+                    unset CF_Token
+                fi
+                run_feature_script acme-cert.sh "--domain=$acme_domain"
+                unset CF_Token
+                break
+                ;;
+            8) run_feature_script hysteria2.sh; break ;;
+            9) break ;;
             *) warn "Invalid menu choice / 无效选择" ;;
         esac
     done
@@ -1873,25 +1891,6 @@ ${socks_inbound_json}}
         "routing": {
           "domainStrategy": "IPIfNonMatch",
           "rules": [
-        /* UNCOMMENT THIS BLOCK TO ENABLE WARP FOR CERTAIN DOMAINS */
-        /* warp-out is going to localhost:40000 created by wireproxy */
-        /* to install wireproxy and run the following and choose 12 wireproxy */
-        /* wget -N https://gitlab.com/fscarmen/warp/-/raw/main/menu.sh && bash menu.sh */
-        /*
-            {
-                "type": "field",
-                "domain": [
-                    "geosite:disney",
-                    "geosite:netflix",
-                    "geosite:youtube",
-                    "geosite:google",
-                    "geosite:category-ai-!cn",
-                    "geosite:category-media-!cn",
-                    "geosite:category-forums"
-                ],
-                "outboundTag": "warp-out"
-            }, 
-        */
             {
               "type": "field",
               "ip": ["geoip:private"],

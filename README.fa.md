@@ -29,7 +29,7 @@
 8. نمایش راهنما با `--help`  
 9. فقط مراحل ساده را نشان می‌دهد—لاگ کامل در فایل ذخیره می‌شود  
 10. تولید QR کد
-11. گزینه `--menu` برای انتخاب Realm، SOCKS، WARP، Sing-box و BBR
+11. گزینه `--menu` برای انتخاب Realm، SOCKS، WARP، Sing-box، BBR، گواهی acme.sh و Hysteria2
 12. هر قابلیت به‌صورت اسکریپت مستقل نیز قابل اجراست
 13. انتخاب خودکار SNI هدف REALITY مناسب (الهام‌گرفته از REALITY Target Scanner پروژه 3x-ui؛ بررسی TLS 1.3 و HTTP/2)
 14. در صورت نبودن `jq`، قابلیت‌های JSONمحور آن را خودکار نصب می‌کنند
@@ -72,9 +72,13 @@ bash <(curl -fsSL https://raw.githubusercontent.com/livingfree2023/nokey/refs/he
 bash <(curl -fsSL https://raw.githubusercontent.com/livingfree2023/nokey/refs/heads/main/xray-warp.sh)
 bash <(curl -fsSL https://raw.githubusercontent.com/livingfree2023/nokey/refs/heads/main/singbox.sh)
 bash <(curl -fsSL https://raw.githubusercontent.com/livingfree2023/nokey/refs/heads/main/bbr.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/livingfree2023/nokey/refs/heads/main/acme-cert.sh) --domain=example.com
+bash <(curl -fsSL https://raw.githubusercontent.com/livingfree2023/nokey/refs/heads/main/hysteria2.sh) --domain=example.com
 ```
 
 اسکریپت‌ها فایل مشترک `nokey-common.sh` را بارگذاری می‌کنند و قابلیت‌های JSONمحور در صورت نیاز `jq` را از مدیر بسته سیستم نصب می‌کنند.
+
+گزینه acme.sh در منو، در صورت وارد کردن توکن Cloudflare از DNS-01 و در غیر این صورت از HTTP-01 مستقل روی پورت ۸۰ استفاده می‌کند و گواهی را در `/etc/hysteria/` قرار می‌دهد. Hysteria2 ابتدا همین مسیر و `~/.acme.sh/` را بررسی می‌کند و در صورت نبودن گواهی، مسیر گواهی و کلید خصوصی را می‌پرسد. پس از فعال شدن سرویس، لینک `hysteria2://` و تنظیمات YAML سازگار با Mihomo/Clash در `nokey.url` ذخیره می‌شوند.
 
 ---
 

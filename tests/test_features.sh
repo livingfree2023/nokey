@@ -4,7 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-scripts=(nokey.sh nokey-common.sh realm.sh singbox.sh xray-socks.sh xray-warp.sh bbr.sh warp-helper.sh)
+scripts=(nokey.sh nokey-common.sh realm.sh singbox.sh xray-socks.sh xray-warp.sh bbr.sh warp-helper.sh acme-cert.sh hysteria2.sh)
 for script in "${scripts[@]}"; do
     [[ -x "$REPO_ROOT/$script" ]] || { echo "FAIL: $script is not executable"; exit 1; }
     bash -n "$REPO_ROOT/$script"
@@ -21,6 +21,15 @@ singbox_output="$(bash "$REPO_ROOT/singbox.sh" --dry-run)"
 
 bbr_output="$(bash "$REPO_ROOT/bbr.sh" --dry-run)"
 [[ "$bbr_output" == *"BBR dry-run"* ]]
+
+acme_output="$(bash "$REPO_ROOT/acme-cert.sh" --domain=example.com --dry-run)"
+[[ "$acme_output" == *"ACME dry-run"* ]]
+
+hysteria_output="$(bash "$REPO_ROOT/hysteria2.sh" --domain=example.com --dry-run)"
+[[ "$hysteria_output" == *"Hysteria2 dry-run"* ]]
+
+[[ -x "$REPO_ROOT/hysteria2.rc" ]]
+grep -q 'ExecStart=/usr/local/bin/hysteria server --config /etc/hysteria/config.yaml' "$REPO_ROOT/hysteria2.service"
 
 [[ "$(bash "$REPO_ROOT/xray-socks.sh" --help)" == *"Usage: xray-socks.sh"* ]]
 

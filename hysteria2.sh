@@ -1,0 +1,325 @@
+#!/bin/bash
+# shellcheck disable=SC2034,SC2154
+
+readonly HYSTERIA_BINARY="/usr/local/bin/hysteria"
+readonly HYSTERIA_CONFIG_DIR="/etc/hysteria"
+readonly HYSTERIA_CONFIG_FILE="/etc/hysteria/config.yaml"
+readonly HYSTERIA_CERT_FILE="/etc/hysteria/fullchain.pem"
+readonly HYSTERIA_KEY_FILE="/etc/hysteria/private.key"
+readonly HYSTERIA_SERVICE_NAME="hysteria2.service"
+readonly HYSTERIA_SERVICE_NAME_ALPINE="hysteria2"
+readonly HYSTERIA_RELEASE_URL="https://github.com/apernet/hysteria/releases/latest/download/hysteria-linux"
+readonly HYSTERIA_SERVICE_URL="https://raw.githubusercontent.com/livingfree2023/nokey/refs/heads/main/hysteria2.service"
+readonly HYSTERIA_RC_URL="https://raw.githubusercontent.com/livingfree2023/nokey/refs/heads/main/hysteria2.rc"
+
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -f "${script_dir}/nokey-common.sh" ]]; then
+    # shellcheck source=/dev/null
+    . "${script_dir}/nokey-common.sh"
+else
+    common_url="${NOKEY_COMMON_URL:-https://raw.githubusercontent.com/livingfree2023/nokey/refs/heads/main/nokey-common.sh}"
+    if ! command -v curl >/dev/null 2>&1; then
+        echo "curl is required to load nokey-common.sh" >&2
+        exit 1
+    fi
+    # shellcheck source=/dev/null
+    . <(curl -fsSL "$common_url")
+fi
+
+domain=""
+port=443
+password=""
+cert_path=""
+key_path=""
+masquerade_url="https://www.bing.com"
+force_reinstall=0
+dry_run=0
+remove_mode=0
+manager=""
+
+if [[ -f /etc/os-release ]]; then
+    # shellcheck disable=SC1091
+    . /etc/os-release
+fi
+
+show_help() {
+    echo "Usage: hysteria2.sh [--domain=DOMAIN] [--port=PORT] [--password=PASSWORD]"
+    echo "       [--cert=PATH] [--key=PATH] [--masquerade=URL] [--force] [--remove] [--dry-run]"
+}
+
+read_tty_value() {
+    local prompt="$1"
+    local value=""
+    if [[ ! -r /dev/tty ]]; then
+        return 1
+    fi
+    read -r -p "$prompt" value < /dev/tty || return 1
+    printf '%s' "$value"
+}
+
+parse_args() {
+    local arg=""
+    for arg in "$@"; do
+        case "$arg" in
+            --domain=*) domain="${arg#*=}" ;;
+            --port=*) port="${arg#*=}" ;;
+            --password=*) password="${arg#*=}" ;;
+            --cert=*) cert_path="${arg#*=}" ;;
+            --key=*) key_path="${arg#*=}" ;;
+            --masquerade=*) masquerade_url="${arg#*=}" ;;
+            --force) force_reinstall=1 ;;
+            --remove) remove_mode=1 ;;
+            --dry-run) dry_run=1 ;;
+            --help) show_help; exit 0 ;;
+            *) error "Unknown option: $arg"; show_help; return 1 ;;
+        esac
+    done
+}
+
+validate_args() {
+    if [[ "$remove_mode" -eq 1 ]]; then
+        return 0
+    fi
+    if [[ -z "$domain" ]]; then
+        if [[ -t 0 || -r /dev/tty ]]; then
+            domain="$(read_tty_value "Hysteria domain: ")" || return 1
+        else
+            error "--domain is required in non-interactive mode"
+            return 1
+        fi
+    fi
+    if [[ ! "$domain" =~ ^[A-Za-z0-9.-]+$ ]]; then
+        error "Invalid domain: $domain"
+        return 1
+    fi
+    if ! [[ "$port" =~ ^[0-9]+$ ]] || (( port < 1 || port > 65535 )); then
+        error "Invalid port: $port"
+        return 1
+    fi
+    if [[ -z "$password" ]]; then
+        password="$(random_hex 16)"
+    fi
+    if [[ ! "$password" =~ ^[A-Za-z0-9._-]+$ ]]; then
+        error "Password may contain only letters, numbers, dot, underscore, and hyphen"
+        return 1
+    fi
+}
+
+find_certificate_pair() {
+    local acme_home="${ACME_HOME:-${HOME}/.acme.sh}"
+    local base=""
+    local candidates=(
+        "$HYSTERIA_CERT_FILE|$HYSTERIA_KEY_FILE"
+        "${acme_home}/${domain}_ecc/fullchain.cer|${acme_home}/${domain}_ecc/${domain}.key"
+        "${acme_home}/${domain}/fullchain.cer|${acme_home}/${domain}/${domain}.key"
+        "/root/.acme.sh/${domain}_ecc/fullchain.cer|/root/.acme.sh/${domain}_ecc/${domain}.key"
+        "/root/.acme.sh/${domain}/fullchain.cer|/root/.acme.sh/${domain}/${domain}.key"
+    )
+    for base in "${candidates[@]}"; do
+        cert_path="${base%%|*}"
+        key_path="${base#*|}"
+        if [[ -f "$cert_path" && -f "$key_path" ]]; then
+            return 0
+        fi
+    done
+    cert_path=""
+    key_path=""
+    return 1
+}
+
+prompt_for_certificates() {
+    if [[ -n "$cert_path" && -n "$key_path" ]]; then
+        return 0
+    fi
+    if [[ ! -r /dev/tty ]]; then
+        error "No ACME certificate found. Use --cert=PATH --key=PATH"
+        return 1
+    fi
+    cert_path="$(read_tty_value "Certificate path (fullchain): ")" || return 1
+    key_path="$(read_tty_value "Private key path: ")" || return 1
+    [[ -f "$cert_path" && -f "$key_path" ]] || {
+        error "Certificate or private key file does not exist"
+        return 1
+    }
+}
+
+download_file() {
+    local url="$1"
+    local destination="$2"
+    local temporary="${destination}.tmp"
+    if ! curl -fsSL "$url" -o "$temporary"; then
+        rm -f "$temporary"
+        return 1
+    fi
+    mv "$temporary" "$destination"
+}
+
+install_binary() {
+    local arch=""
+    local url=""
+    local temporary=""
+    arch="$(resolve_arch_name)" || {
+        error "Unsupported architecture: $(uname -m)"
+        return 1
+    }
+    if [[ -x "$HYSTERIA_BINARY" && "$force_reinstall" -eq 0 ]]; then
+        return 0
+    fi
+    temporary="$(mktemp)" || return 1
+    url="${HYSTERIA_RELEASE_URL}-${arch}"
+    task_start "下载Hysteria2 / Download Hysteria2"
+    if ! download_file "$url" "$temporary"; then
+        rm -f "$temporary"
+        task_fail
+        error "下载Hysteria2失败 / Failed to download Hysteria2"
+        return 1
+    fi
+    install -m 755 "$temporary" "$HYSTERIA_BINARY"
+    rm -f "$temporary"
+    task_done
+}
+
+write_config() {
+    mkdir -p "$HYSTERIA_CONFIG_DIR"
+    cat > "$HYSTERIA_CONFIG_FILE" <<EOF
+listen: :${port}
+tls:
+  cert: ${cert_path}
+  key: ${key_path}
+auth:
+  type: password
+  password: ${password}
+masquerade:
+  type: proxy
+  proxy:
+    url: ${masquerade_url}
+    rewriteHost: true
+EOF
+    chmod 600 "$HYSTERIA_CONFIG_FILE"
+}
+
+install_service_file() {
+    local local_path="$1"
+    local remote_url="$2"
+    local destination="$3"
+    local temporary=""
+    if [[ -f "${script_dir}/${local_path}" ]]; then
+        install -m 644 "${script_dir}/${local_path}" "$destination"
+        return 0
+    fi
+    temporary="$(mktemp)" || return 1
+    if ! download_file "$remote_url" "$temporary"; then
+        rm -f "$temporary"
+        return 1
+    fi
+    install -m 644 "$temporary" "$destination"
+    rm -f "$temporary"
+}
+
+install_openrc_service() {
+    local destination="/etc/init.d/${HYSTERIA_SERVICE_NAME_ALPINE}"
+    install_service_file hysteria2.rc "$HYSTERIA_RC_URL" "$destination" || return 1
+    configure_openrc_crash_restart "$destination" || return 1
+    rc-update add "$HYSTERIA_SERVICE_NAME_ALPINE" default >> "$LOG_FILE" 2>&1 || true
+    rc-service "$HYSTERIA_SERVICE_NAME_ALPINE" restart >> "$LOG_FILE" 2>&1
+}
+
+install_systemd_service() {
+    local destination="/etc/systemd/system/${HYSTERIA_SERVICE_NAME}"
+    install_service_file hysteria2.service "$HYSTERIA_SERVICE_URL" "$destination" || return 1
+    configure_systemd_crash_restart "$destination" || return 1
+    {
+        systemctl daemon-reload
+        systemctl enable "$HYSTERIA_SERVICE_NAME"
+        systemctl restart "$HYSTERIA_SERVICE_NAME"
+    } >> "$LOG_FILE" 2>&1
+}
+
+service_is_active() {
+    if [[ "${ID:-}" == "alpine" || "${ID_LIKE:-}" == "alpine" ]]; then
+        rc-service "$HYSTERIA_SERVICE_NAME_ALPINE" status >/dev/null 2>&1
+    else
+        systemctl is-active --quiet "$HYSTERIA_SERVICE_NAME"
+    fi
+}
+
+write_share_urls() {
+    local share_url="hysteria2://${password}@${domain}:${port}/?sni=${domain}"
+    local proxy_name="${domain}-hysteria2"
+    {
+        echo "$share_url"
+        echo ""
+        echo "proxies:"
+        echo "  - name: ${proxy_name}"
+        echo "    type: hysteria2"
+        echo "    server: ${domain}"
+        echo "    port: ${port}"
+        echo "    password: ${password}"
+        echo "    sni: ${domain}"
+        echo "    alpn:"
+        echo "      - h3"
+        echo "    skip-cert-verify: false"
+    } > "$URL_FILE"
+    success "Hysteria2 is running"
+    info "Share URL: $share_url"
+    info "Mihomo/Clash YAML saved to: $URL_FILE"
+    tee -a "$LOG_FILE" < "$URL_FILE"
+}
+
+uninstall_hysteria() {
+    task_start "卸载Hysteria2 / Uninstall Hysteria2"
+    if [[ "${ID:-}" == "alpine" || "${ID_LIKE:-}" == "alpine" ]]; then
+        rc-service "$HYSTERIA_SERVICE_NAME_ALPINE" stop >> "$LOG_FILE" 2>&1 || true
+        rc-update del "$HYSTERIA_SERVICE_NAME_ALPINE" default >> "$LOG_FILE" 2>&1 || true
+        rm -f "/etc/init.d/${HYSTERIA_SERVICE_NAME_ALPINE}"
+    else
+        systemctl disable --now "$HYSTERIA_SERVICE_NAME" >> "$LOG_FILE" 2>&1 || true
+        rm -f "/etc/systemd/system/${HYSTERIA_SERVICE_NAME}"
+        systemctl daemon-reload >> "$LOG_FILE" 2>&1 || true
+    fi
+    rm -f "$HYSTERIA_BINARY"
+    rm -rf "$HYSTERIA_CONFIG_DIR"
+    task_done
+}
+
+main() {
+    parse_args "$@" || exit 1
+    if [[ "$dry_run" -eq 1 ]]; then
+        info "Hysteria2 dry-run: no system changes will be made"
+        info "Binary: $HYSTERIA_BINARY"
+        info "Config: $HYSTERIA_CONFIG_FILE"
+        info "Port: $port"
+        exit 0
+    fi
+    check_root
+    init_output_files
+    if [[ "$remove_mode" -eq 1 ]]; then
+        uninstall_hysteria
+        exit 0
+    fi
+    validate_args || exit 1
+    find_certificate_pair || prompt_for_certificates || exit 1
+    install_dependencies curl
+    install_binary || exit 1
+    write_config
+    if [[ "${ID:-}" == "alpine" || "${ID_LIKE:-}" == "alpine" ]]; then
+        install_openrc_service || {
+            error "Failed to start Hysteria2 OpenRC service"
+            exit 1
+        }
+    else
+        install_systemd_service || {
+            error "Failed to start Hysteria2 systemd service"
+            exit 1
+        }
+    fi
+    if ! service_is_active; then
+        error "Hysteria2 service is not active; check $LOG_FILE"
+        exit 1
+    fi
+    write_share_urls
+}
+
+if [[ "${BASH_SOURCE[0]}" == "$0" ]] || [[ -n "${BASH_EXECUTION_STRING:-}" ]]; then
+    main "$@"
+fi

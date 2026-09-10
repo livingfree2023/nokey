@@ -53,6 +53,11 @@ touch "$fixture_dir/custom.crt" "$fixture_dir/custom.key"
     find_certificate_pair
     [[ "$cert_path" == *"custom.crt" ]]
     [[ "$key_path" == *"custom.key" ]]
+    cert_path="$fixture_dir/missing.crt"
+    key_path="$fixture_dir/missing.key"
+    if prompt_for_certificates; then
+        exit 1
+    fi
     password=test-password
     port=443
     write_share_urls

@@ -6,6 +6,7 @@ readonly HYSTERIA_CERT_DIR="/etc/hysteria"
 readonly HYSTERIA_CERT_FILE="/etc/hysteria/fullchain.pem"
 readonly HYSTERIA_KEY_FILE="/etc/hysteria/private.key"
 readonly ACME_INSTALL_URL="https://get.acme.sh"
+readonly ACME_INSTALL_SHA256="8681df828f7765a351a4fc708a46fc3f7f383c0155fe4b19002d20e5c4ee5431"
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [[ -f "${script_dir}/nokey-common.sh" ]]; then
@@ -77,6 +78,7 @@ parse_args() {
 ensure_acme_binary() {
     local acme_home="${ACME_HOME:-${ACME_DEFAULT_HOME}}"
     local acme_bin="${acme_home}/acme.sh"
+    local installer=""
 
     if [[ -x "$acme_bin" ]]; then
         acme_binary_path="$acme_bin"
@@ -84,13 +86,22 @@ ensure_acme_binary() {
     fi
 
     task_start "安装 acme.sh / Install acme.sh"
+    installer="$(mktemp)" || return 1
+    if ! curl -fsSL "$ACME_INSTALL_URL" -o "$installer" || \
+        [[ "$(sha256sum "$installer" | awk '{print $1}')" != "$ACME_INSTALL_SHA256" ]]; then
+        rm -f "$installer"
+        task_fail
+        error "acme.sh installer checksum verification failed / acme.sh安装器校验和验证失败"
+        return 1
+    fi
     if [[ -n "$email" ]]; then
-        if ! curl -fsSL "$ACME_INSTALL_URL" | sh -s email="$email" >> "$LOG_FILE" 2>&1; then
-            task_fail
-            error "安装acme.sh失败 / Failed to install acme.sh"
-            return 1
-        fi
-    elif ! curl -fsSL "$ACME_INSTALL_URL" | sh >> "$LOG_FILE" 2>&1; then
+        sh "$installer" email="$email" >> "$LOG_FILE" 2>&1
+    else
+        sh "$installer" >> "$LOG_FILE" 2>&1
+    fi
+    local install_status=$?
+    rm -f "$installer"
+    if [[ "$install_status" -ne 0 ]]; then
         task_fail
         error "安装acme.sh失败 / Failed to install acme.sh"
         return 1

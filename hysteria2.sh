@@ -10,8 +10,6 @@ readonly HYSTERIA_SERVICE_NAME="hysteria2.service"
 readonly HYSTERIA_SERVICE_NAME_ALPINE="hysteria2"
 readonly HYSTERIA_VERSION="v2.9.2"
 readonly HYSTERIA_RELEASE_URL="https://github.com/apernet/hysteria/releases/download/app/${HYSTERIA_VERSION}/hysteria-linux"
-readonly HYSTERIA_SERVICE_URL="https://raw.githubusercontent.com/livingfree2023/nokey/refs/heads/main/hysteria2.service"
-readonly HYSTERIA_RC_URL="https://raw.githubusercontent.com/livingfree2023/nokey/refs/heads/main/hysteria2.rc"
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [[ -f "${script_dir}/nokey-common.sh" ]]; then
@@ -227,27 +225,20 @@ EOF
     chmod 600 "$HYSTERIA_CONFIG_FILE"
 }
 
-install_service_file() {
-    local local_path="$1"
-    local remote_url="$2"
-    local destination="$3"
-    local temporary=""
-    if [[ -f "${script_dir}/${local_path}" ]]; then
-        install -m 644 "${script_dir}/${local_path}" "$destination"
-        return 0
-    fi
-    temporary="$(mktemp)" || return 1
-    if ! download_file "$remote_url" "$temporary"; then
-        rm -f "$temporary"
-        return 1
-    fi
-    install -m 644 "$temporary" "$destination"
-    rm -f "$temporary"
-}
-
 install_openrc_service() {
     local destination="/etc/init.d/${HYSTERIA_SERVICE_NAME_ALPINE}"
-    install_service_file hysteria2.rc "$HYSTERIA_RC_URL" "$destination" || return 1
+    cat > "$destination" <<'EOF'
+#!/sbin/openrc-run
+name="hysteria2"
+description="Hysteria 2 Server"
+command="/usr/local/bin/hysteria"
+command_args="server --config /etc/hysteria/config.yaml"
+command_background=true
+pidfile="/run/${RC_SVCNAME}.pid"
+output_log="/var/log/${RC_SVCNAME}.log"
+error_log="/var/log/${RC_SVCNAME}.err"
+depend() { need net; }
+EOF
     chmod 755 "$destination"
     configure_openrc_crash_restart "$destination" || return 1
     rc-update add "$HYSTERIA_SERVICE_NAME_ALPINE" default >> "$LOG_FILE" 2>&1 || true
@@ -256,7 +247,23 @@ install_openrc_service() {
 
 install_systemd_service() {
     local destination="/etc/systemd/system/${HYSTERIA_SERVICE_NAME}"
-    install_service_file hysteria2.service "$HYSTERIA_SERVICE_URL" "$destination" || return 1
+    cat > "$destination" <<'EOF'
+[Unit]
+Description=Hysteria 2 Server
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/etc/hysteria
+ExecStart=/usr/local/bin/hysteria server --config /etc/hysteria/config.yaml
+Restart=on-failure
+RestartSec=5s
+LimitNOFILE=1048576
+
+[Install]
+WantedBy=multi-user.target
+EOF
     configure_systemd_crash_restart "$destination" || return 1
     {
         systemctl daemon-reload

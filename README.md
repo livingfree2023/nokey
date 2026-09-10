@@ -33,7 +33,8 @@
 14. 自动探测可用的REALITY目标SNI（参考3x-ui的REALITY Target Scanner，验证TLS 1.3 + HTTP/2）
 15. 支持`--addsocks`为Xray添加带随机端口、用户名和密码的SOCKS5入站
 16. Xray REALITY配置使用`minClientVer: "0.0.0"`兼容旧版客户端
-17. 暂时想到这么多……
+17. 使用`--menu`选择Realm、SOCKS、WARP、Sing-box和BBR等功能
+18. 缺少`jq`时，SOCKS和WARP功能会通过系统包管理器自动安装
 
 > 已测试包括：ubuntu22/debian11/Rocky9.2/CentOS7.6/Fedora30/Alma9.2/alpine3.22，欢迎测试提issue或者报告成功结果
 
@@ -45,6 +46,27 @@ rm -f /usr/local/bin/nokey  # 删除老文件
 
 curl -fsSL -o /usr/local/bin/nokey https://raw.githubusercontent.com/livingfree2023/nokey/refs/heads/main/nokey.sh && chmod +x /usr/local/bin/nokey
 ```
+
+### 功能菜单和独立脚本
+
+不带参数运行`nokey`时，行为保持不变：安装Xray VLESS Reality、BBR和FQ。
+需要其他功能时运行菜单：
+
+```
+nokey --menu
+```
+
+也可以直接使用独立脚本：
+
+```
+bash <(curl -fsSL https://raw.githubusercontent.com/livingfree2023/nokey/refs/heads/main/realm.sh) --remote=1.2.3.4:443
+bash <(curl -fsSL https://raw.githubusercontent.com/livingfree2023/nokey/refs/heads/main/xray-socks.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/livingfree2023/nokey/refs/heads/main/xray-warp.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/livingfree2023/nokey/refs/heads/main/singbox.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/livingfree2023/nokey/refs/heads/main/bbr.sh)
+```
+
+这些脚本会自动加载`nokey-common.sh`。需要JSON配置处理的功能会先检查并安装`jq`。
 
 ### 场景一：只安装Xray（默认，不带任何参数）
 ```
@@ -72,6 +94,8 @@ curl --proxy 'socks5h://USERNAME:PASSWORD@SERVER_IP:PORT' https://ipinfo.io
 > `minClientVer: "0.0.0"`允许旧版Xray客户端连接，但旧客户端的TLS指纹可能更容易被识别；这是为兼容性做出的明确取舍。
 
 ### 场景二：安装Xray + Realm（同时安装两者）
+
+推荐使用`nokey --menu`中的Realm选项或直接运行`realm.sh`。下面的旧参数仍保留兼容：
 ```
 # 安装Xray和Realm，把443转发到1.2.3.4:443
 nokey --realm --remote 1.2.3.4:443

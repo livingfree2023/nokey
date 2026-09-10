@@ -28,11 +28,11 @@
 7. امکان تنظیم پروتکل، UUID، SNI، و پورت با پارامترها  
 8. نمایش راهنما با `--help`  
 9. فقط مراحل ساده را نشان می‌دهد—لاگ کامل در فایل ذخیره می‌شود  
-10. تولید QR کد  
-11. حالت `--realm` — نصب پروکسی رله Realm در کنار Xray (با `--remote` اجباری، `--listen` اختیاری)
-12. حالت `--realm-only` — نصب فقط Realm (بدون Xray)
+10. تولید QR کد
+11. گزینه `--menu` برای انتخاب Realm، SOCKS، WARP، Sing-box و BBR
+12. هر قابلیت به‌صورت اسکریپت مستقل نیز قابل اجراست
 13. انتخاب خودکار SNI هدف REALITY مناسب (الهام‌گرفته از REALITY Target Scanner پروژه 3x-ui؛ بررسی TLS 1.3 و HTTP/2)
-14. فعلاً همین‌ها... بیشتر در راهند!
+14. در صورت نبودن `jq`، قابلیت‌های JSONمحور آن را خودکار نصب می‌کنند
 
 ---
 
@@ -56,6 +56,26 @@
 curl -fsSL -o /usr/local/bin/nokey https://raw.githubusercontent.com/livingfree2023/nokey/refs/heads/main/nokey.sh && chmod +x /usr/local/bin/nokey && nokey
 ```
 
+## منوی قابلیت‌ها و اسکریپت‌های مستقل
+
+اجرای `nokey` بدون پارامتر رفتار قبلی را حفظ می‌کند و Xray VLESS Reality به‌همراه BBR و FQ را نصب می‌کند.
+
+```bash
+nokey --menu
+```
+
+قابلیت‌ها را می‌توان مستقیماً نیز اجرا کرد:
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/livingfree2023/nokey/refs/heads/main/realm.sh) --remote=1.2.3.4:443
+bash <(curl -fsSL https://raw.githubusercontent.com/livingfree2023/nokey/refs/heads/main/xray-socks.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/livingfree2023/nokey/refs/heads/main/xray-warp.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/livingfree2023/nokey/refs/heads/main/singbox.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/livingfree2023/nokey/refs/heads/main/bbr.sh)
+```
+
+اسکریپت‌ها فایل مشترک `nokey-common.sh` را بارگذاری می‌کنند و قابلیت‌های JSONمحور در صورت نیاز `jq` را از مدیر بسته سیستم نصب می‌کنند.
+
 ---
 
 # 🔍 پیش‌نمایش بدون تغییر سیستم (dry-run)
@@ -68,7 +88,9 @@ nokey --dry-run
 
 # 🔁 رله Realm
 
-### سناریوی ۱ — نصب Xray + Realm (هر دو با هم)
+### سناریوی ۱ — نصب Realm
+
+از `nokey --menu` یا `realm.sh` استفاده کنید. پارامترهای قدیمی برای سازگاری حفظ شده‌اند.
 ```bash
 # نصب Xray و Realm، انتقال پورت محلی 443 به 1.2.3.4:443
 nokey --realm --remote 1.2.3.4:443

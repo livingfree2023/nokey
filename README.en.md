@@ -29,10 +29,10 @@ Run a single command, sit back, and wait. No chatter, no fuss—super fast. Read
 8. Shows help with `--help`  
 9. Outputs only minimal steps—detailed logs saved to a file  
 10. Generates QR codes  
-11. `--realm` mode — installs Realm relay proxy alongside Xray (`--remote` required, `--listen` optional)
-12. `--realm-only` mode — installs Realm relay proxy only (without Xray)
+11. `--menu` opens the Realm, SOCKS, WARP, Sing-box, and BBR feature menu
+12. Feature implementations are separate scripts and can be run with one-liners
 13. Auto-probes a feasible REALITY target SNI (mirrors 3x-ui's REALITY Target Scanner; verifies TLS 1.3 + HTTP/2)
-14. More features coming soon...
+14. Installs `jq` automatically before JSON-based SOCKS/WARP operations when missing
 
 ---
 
@@ -56,6 +56,26 @@ These release assets are generated/synced by GitHub Actions. See: [`./.github/wo
 curl -fsSL -o /usr/local/bin/nokey https://raw.githubusercontent.com/livingfree2023/nokey/refs/heads/main/nokey.sh && chmod +x /usr/local/bin/nokey && nokey
 ```
 
+## Feature menu and standalone scripts
+
+Running `nokey` without parameters keeps the original behavior: Xray VLESS + Reality, BBR, and FQ setup.
+
+```bash
+nokey --menu
+```
+
+The features can also be run directly without installing the scripts first:
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/livingfree2023/nokey/refs/heads/main/realm.sh) --remote=1.2.3.4:443
+bash <(curl -fsSL https://raw.githubusercontent.com/livingfree2023/nokey/refs/heads/main/xray-socks.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/livingfree2023/nokey/refs/heads/main/xray-warp.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/livingfree2023/nokey/refs/heads/main/singbox.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/livingfree2023/nokey/refs/heads/main/bbr.sh)
+```
+
+Each entrypoint loads `nokey-common.sh`; JSON-based features install `jq` through the detected package manager when it is missing.
+
 ---
 
 # 🔍 Dry-run (preview without changing system)
@@ -68,7 +88,9 @@ nokey --dry-run
 
 # 🔁 Realm relay proxy
 
-### Scenario 1 — Install Xray + Realm (both)
+### Scenario 1 — Install Realm
+
+Use `nokey --menu` or `realm.sh`. The old combined flags remain available for compatibility.
 ```bash
 # Install Xray and Realm, forward local 443 to 1.2.3.4:443
 nokey --realm --remote 1.2.3.4:443

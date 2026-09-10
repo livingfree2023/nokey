@@ -176,6 +176,12 @@ parse_args --port=8443
 [[ "$port" == "8443" ]] || fail "--port=8443 should set port=8443"
 pass "parse_args valid --port"
 
+arg_count=0
+menu_mode=0
+parse_args --menu
+[[ "$menu_mode" -eq 1 ]] || fail "--menu should set menu_mode=1"
+pass "parse_args --menu"
+
 # Test 13: parse_args --remove sets remove_mode without early exit
 remove_mode=0
 parse_args --remove

@@ -1,8 +1,9 @@
 #!/bin/bash
+# shellcheck disable=SC2154
 
 # Constants and Configuration
 
-readonly SCRIPT_VERSION="2026.20"
+readonly SCRIPT_VERSION="2026.21"
 readonly LOG_FILE="nokey.log"
 readonly URL_FILE="nokey.url"
 readonly DEFAULT_DOMAIN="www.amd.com"
@@ -39,6 +40,20 @@ readonly SINGBOX_SERVICE_NAME_ALPINE="sing-box"
 readonly GITHUB_SINGBOX_SERVICE_URL="https://raw.githubusercontent.com/livingfree2023/nokey/refs/heads/main/sing-box.service"
 readonly GITHUB_SINGBOX_RC_URL="https://raw.githubusercontent.com/livingfree2023/nokey/refs/heads/main/sing-box.rc"
 readonly SINGBOX_CONFIG_DIR="/etc/sing-box"
+
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -f "${script_dir}/nokey-common.sh" ]]; then
+    # shellcheck source=/dev/null
+    . "${script_dir}/nokey-common.sh"
+else
+    common_url="${NOKEY_COMMON_URL:-https://raw.githubusercontent.com/livingfree2023/nokey/refs/heads/main/nokey-common.sh}"
+    if ! command -v curl >/dev/null 2>&1; then
+        echo "curl is required to load nokey-common.sh" >&2
+        exit 1
+    fi
+    # shellcheck source=/dev/null
+    . <(curl -fsSL "$common_url")
+fi
 
 mldsa_enabled=0
 current_hostname=$(hostname)
@@ -78,27 +93,10 @@ sing_box_mode=0
 sing_box_only=0
 # Output helpers use a separate context so the requested install mode stays immutable.
 result_sing_box_mode=0
+menu_mode=0
 
 # Last REALITY probe latency in ms (set by probe_reality_target; read by pick_default_domain)
 probe_latency_ms=""
-
-# Color definitions (suppressed when stdout is not a TTY to keep logs/pipes clean)
-if [[ -t 1 ]]; then
-    readonly red='\e[91m'
-    readonly green='\e[92m'
-    readonly yellow='\e[93m'
-    readonly magenta='\e[95m'
-    readonly cyan='\e[96m'
-    readonly none='\e[0m'
-else
-    readonly red=''
-    readonly green=''
-    readonly yellow=''
-    readonly magenta=''
-    readonly cyan=''
-    readonly none=''
-fi
-
 
 init_output_files() {
     : > "$LOG_FILE"
@@ -1465,6 +1463,9 @@ parse_args() {
         --dry-run)
           dry_run=1
           ;;
+        --menu)
+          menu_mode=1
+          ;;
         *)
           error "什么鬼参数: $arg / Unknown option: $arg"
           show_help 1
@@ -1489,6 +1490,63 @@ parse_args() {
          fi
      fi
      
+}
+
+run_feature_script() {
+    local feature_name="$1"
+    shift
+    local feature_path="${script_dir}/${feature_name}"
+    local feature_url="https://raw.githubusercontent.com/livingfree2023/nokey/refs/heads/main/${feature_name}"
+
+    if [[ -f "$feature_path" ]]; then
+        bash "$feature_path" "$@"
+    else
+        bash <(curl -fsSL "$feature_url") "$@"
+    fi
+}
+
+show_feature_menu() {
+    local choice=""
+    local remote=""
+    local listen=""
+
+    if ! exec 3</dev/tty; then
+        error "--menu requires an interactive terminal / --menu需要交互式终端"
+        return 1
+    fi
+
+    while true; do
+        echo ""
+        echo "NoKey menu"
+        echo "1) Install Xray VLESS Reality"
+        echo "2) Install Realm"
+        echo "3) Add Xray SOCKS5"
+        echo "4) Configure Xray WARP"
+        echo "5) Install Sing-box VLESS Reality"
+        echo "6) Enable BBR"
+        echo "7) Exit"
+        read -r -p "Select an option: " choice <&3 || break
+        case "$choice" in
+            1) run_feature_script nokey.sh; break ;;
+            2)
+                read -r -p "Realm remote host:port: " remote <&3
+                read -r -p "Realm listen address (optional): " listen <&3
+                if [[ -n "$listen" ]]; then
+                    run_feature_script realm.sh "--remote=$remote" "--listen=$listen"
+                else
+                    run_feature_script realm.sh "--remote=$remote"
+                fi
+                break
+                ;;
+            3) run_feature_script xray-socks.sh; break ;;
+            4) run_feature_script xray-warp.sh; break ;;
+            5) run_feature_script singbox.sh; break ;;
+            6) run_feature_script bbr.sh; break ;;
+            7) break ;;
+            *) warn "Invalid menu choice / 无效选择" ;;
+        esac
+    done
+    exec 3<&-
 }
 
 
@@ -2356,6 +2414,7 @@ show_help() {
   echo "  --listen=ADDRESS   设置Realm监听地址 (可选, 默认派生自远程端口) / Set Realm listen address (optional, defaults to remote port on any address)"
   echo "  --remove           卸载Xray (和已安装的Realm) 与NoKey / Uninstall Xray (and Realm if installed) and NoKey"
   echo "  --dry-run          仅预览安装动作，不写入系统 / Preview actions only"
+  echo "  --menu             打开其他功能菜单 / Open the feature menu"
   echo "  --help             显示此帮助信息 / Show this help message"
 
   exit "${1:-0}"
@@ -2776,6 +2835,11 @@ main() {
     show_banner
     parse_args "$@"
 
+    if [[ "$menu_mode" -eq 1 ]]; then
+        show_feature_menu
+        exit $?
+    fi
+
     if [[ "$sing_box_mode" -eq 1 && "$sing_box_only" -eq 0 ]]; then
         install_singbox_alongside=1
     fi
@@ -2794,6 +2858,7 @@ main() {
     check_root
 
     if [[ "$add_limiter_mode" -eq 1 || "$change_sni_mode" -eq 1 ]]; then
+        install_dependencies jq
         patch_existing_xray_config
         info "补丁完成 / Patch complete."
         exit 0
@@ -2831,7 +2896,11 @@ main() {
         exit 0
     fi
 
-    install_dependencies # the next function needs curl, in debian 9 curl is not shipped
+    if [[ "$keepconfig" -eq 1 ]]; then
+        install_dependencies jq
+    else
+        install_dependencies
+    fi
     detect_network_interfaces
 
     if [[ "$realm_only" -ne 1 ]]; then

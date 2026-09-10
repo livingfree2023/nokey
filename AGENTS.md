@@ -2,18 +2,19 @@
 
 ## What this project is
 
-A single-file, one-shot installer script (`nokey.sh`, ~2200 lines) that sets up
-Xray / Realm / Sing-box (VLESS Reality) + BBR on a fresh Linux box with zero
-prompting. Runs from `curl | bash`. Must work on minimal environments
+Several one-shot Bash entrypoints sharing `nokey-common.sh`. `nokey.sh` keeps
+the default Xray VLESS + Reality + BBR installation behavior; Realm, Sing-box,
+SOCKS, WARP, and standalone BBR are separate feature entrypoints. All run from
+`curl | bash` or process substitution and must work on minimal environments
 (Alpine Pods with 64MB RAM, busybox tools, OpenRC), Debian/Ubuntu, CentOS/Rocky,
 Fedora, AlmaLinux.
 
 ## Non-negotiables
 
-- **Single file.** All logic lives in `nokey.sh`. Do not split into multiple
-  scripts. Reusable helpers are functions, not files.
-- **Sourced by tests.** `tests/test_nokey.sh` does `source nokey.sh`. The main
-  flow MUST be guarded: `if [[ "${BASH_SOURCE[0]}" == "$0" ]] || [[ -n "${BASH_EXECUTION_STRING:-}" ]]; then main "$@"; fi`.
+- **Modular entrypoints.** Feature logic belongs in its matching script. Shared
+  portable helpers belong in `nokey-common.sh`; do not duplicate them.
+- **Sourced by tests.** Every entrypoint's main flow MUST be guarded:
+  `if [[ "${BASH_SOURCE[0]}" == "$0" ]] || [[ -n "${BASH_EXECUTION_STRING:-}" ]]; then main "$@"; fi`.
   Nothing may auto-run on `source`.
 - **Shebang and mode.** `#!/bin/bash`, keep file executable.
 - **Portability.** Targets Alpine (busybox + OpenRC), systemd distros, and old
@@ -44,9 +45,10 @@ Fedora, AlmaLinux.
 ## Verification (always run before declaring done)
 
 ```bash
-bash -n nokey.sh                              # syntax check
-shellcheck -x nokey.sh tests/test_nokey.sh    # lint (if shellcheck installed)
-bash tests/test_nokey.sh                      # test suite (sources the script)
+for script in nokey.sh nokey-common.sh realm.sh singbox.sh xray-socks.sh xray-warp.sh bbr.sh; do bash -n "$script"; done
+shellcheck -x nokey.sh nokey-common.sh realm.sh singbox.sh xray-socks.sh xray-warp.sh bbr.sh tests/test_nokey.sh
+bash tests/test_nokey.sh
+bash tests/test_features.sh
 ```
 
 All tests must pass. Tests mock globals (e.g. `IPv4`, `ID`, `ID_LIKE`) and stub
@@ -77,4 +79,3 @@ Other free options for manual fallback via `/models`: `nemotron-3-ultra-free`
 Free tiers are limited-time; if `big-pickle` rotates out, change ONE line in
 `opencode.json` (`"model"`, `agent.build.model`, `agent.plan.model`, and the
 frontmatter of `.opencode/agent/bash-dev.md`) to the best remaining free model.
-

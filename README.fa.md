@@ -73,12 +73,12 @@ bash <(curl -fsSL https://raw.githubusercontent.com/livingfree2023/nokey/refs/he
 bash <(curl -fsSL https://raw.githubusercontent.com/livingfree2023/nokey/refs/heads/main/singbox.sh)
 bash <(curl -fsSL https://raw.githubusercontent.com/livingfree2023/nokey/refs/heads/main/bbr.sh)
 bash <(curl -fsSL https://raw.githubusercontent.com/livingfree2023/nokey/refs/heads/main/acme-cert.sh) --domain=example.com
-bash <(curl -fsSL https://raw.githubusercontent.com/livingfree2023/nokey/refs/heads/main/hysteria2.sh) --domain=example.com
+HYSTERIA_CF_TOKEN=your-cloudflare-token bash <(curl -fsSL https://raw.githubusercontent.com/livingfree2023/nokey/refs/heads/main/hysteria2.sh) --domain=example.com
 ```
 
 اسکریپت‌ها فایل مشترک `nokey-common.sh` را بارگذاری می‌کنند و قابلیت‌های JSONمحور در صورت نیاز `jq` را از مدیر بسته سیستم نصب می‌کنند.
 
-گزینه acme.sh در منو، در صورت وارد کردن توکن Cloudflare از DNS-01 و در غیر این صورت از HTTP-01 مستقل روی پورت ۸۰ استفاده می‌کند و گواهی را در `/etc/hysteria/` قرار می‌دهد. Hysteria2 ابتدا همین مسیر و `~/.acme.sh/` را بررسی می‌کند و در صورت نبودن گواهی، مسیر گواهی و کلید خصوصی را می‌پرسد. پس از فعال شدن سرویس، لینک `hysteria2://` و تنظیمات YAML سازگار با Mihomo/Clash در `nokey.url` ذخیره می‌شوند.
+گزینه acme.sh در منو، در صورت وارد کردن توکن Cloudflare از DNS-01 و در غیر این صورت از HTTP-01 مستقل روی پورت ۸۰ استفاده می‌کند و گواهی را در `/etc/hysteria/` قرار می‌دهد. برای Hysteria2، با ارائه `HYSTERIA_CF_TOKEN` یا وارد کردن توکن، ACME داخلی Hysteria از DNS-01 استفاده می‌کند؛ در غیر این صورت ابتدا مسیرهای `/etc/hysteria/` و `~/.acme.sh/` بررسی شده و سپس مسیر گواهی و کلید خصوصی پرسیده می‌شود. پس از فعال شدن سرویس، لینک `hysteria2://` و تنظیمات YAML سازگار با Mihomo/Clash در `nokey.url` ذخیره می‌شوند.
 
 ---
 

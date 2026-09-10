@@ -30,6 +30,9 @@ port=443
 password=""
 cert_path=""
 key_path=""
+acme_email=""
+cf_token="${HYSTERIA_CF_TOKEN:-${CF_Token:-}}"
+native_acme=0
 masquerade_url="https://www.bing.com"
 force_reinstall=0
 dry_run=0
@@ -43,7 +46,7 @@ fi
 
 show_help() {
     echo "Usage: hysteria2.sh [--domain=DOMAIN] [--port=PORT] [--password=PASSWORD]"
-    echo "       [--cert=PATH] [--key=PATH] [--masquerade=URL] [--force] [--remove] [--dry-run]"
+    echo "       [--cert=PATH] [--key=PATH] [--email=EMAIL] [--masquerade=URL] [--force] [--remove] [--dry-run]"
 }
 
 read_tty_value() {
@@ -65,6 +68,7 @@ parse_args() {
             --password=*) password="${arg#*=}" ;;
             --cert=*) cert_path="${arg#*=}" ;;
             --key=*) key_path="${arg#*=}" ;;
+            --email=*) acme_email="${arg#*=}" ;;
             --masquerade=*) masquerade_url="${arg#*=}" ;;
             --force) force_reinstall=1 ;;
             --remove) remove_mode=1 ;;
@@ -91,6 +95,10 @@ validate_args() {
         error "Invalid domain: $domain"
         return 1
     fi
+    if [[ -n "$acme_email" && ! "$acme_email" =~ ^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$ ]]; then
+        error "Invalid email: $acme_email"
+        return 1
+    fi
     if ! [[ "$port" =~ ^[0-9]+$ ]] || (( port < 1 || port > 65535 )); then
         error "Invalid port: $port"
         return 1
@@ -102,6 +110,32 @@ validate_args() {
         error "Password may contain only letters, numbers, dot, underscore, and hyphen"
         return 1
     fi
+}
+
+read_tty_secret() {
+    local prompt="$1"
+    local value=""
+    if [[ ! -r /dev/tty ]]; then
+        return 1
+    fi
+    read -r -s -p "$prompt" value < /dev/tty || return 1
+    echo >&2
+    printf '%s' "$value"
+}
+
+select_tls_mode() {
+    if [[ -n "$cert_path" || -n "$key_path" ]]; then
+        find_certificate_pair || prompt_for_certificates || return 1
+        return 0
+    fi
+    if [[ -z "$cf_token" && -r /dev/tty ]]; then
+        cf_token="$(read_tty_secret "Cloudflare API token for Hysteria built-in ACME (optional): ")" || true
+    fi
+    if [[ -n "$cf_token" ]]; then
+        native_acme=1
+        return 0
+    fi
+    find_certificate_pair || prompt_for_certificates || return 1
 }
 
 find_certificate_pair() {
@@ -208,7 +242,30 @@ install_binary() {
 
 write_config() {
     mkdir -p "$HYSTERIA_CONFIG_DIR"
-    cat > "$HYSTERIA_CONFIG_FILE" <<EOF
+    if [[ "$native_acme" -eq 1 ]]; then
+        cat > "$HYSTERIA_CONFIG_FILE" <<EOF
+listen: :${port}
+acme:
+  domains:
+    - $(yaml_quote "$domain")
+  type: dns
+  dir: /etc/hysteria/acme
+  dns:
+    name: cloudflare
+    config:
+      cloudflare_api_token: $(yaml_quote "$cf_token")
+$(if [[ -n "$acme_email" ]]; then printf '  email: %s\n' "$(yaml_quote "$acme_email")"; fi)
+auth:
+  type: password
+  password: $(yaml_quote "$password")
+masquerade:
+  type: proxy
+  proxy:
+    url: $(yaml_quote "$masquerade_url")
+    rewriteHost: true
+EOF
+    else
+        cat > "$HYSTERIA_CONFIG_FILE" <<EOF
 listen: :${port}
 tls:
   cert: $(yaml_quote "$cert_path")
@@ -222,6 +279,7 @@ masquerade:
     url: $(yaml_quote "$masquerade_url")
     rewriteHost: true
 EOF
+    fi
     chmod 600 "$HYSTERIA_CONFIG_FILE"
 }
 
@@ -322,11 +380,17 @@ uninstall_hysteria() {
 
 main() {
     parse_args "$@" || exit 1
+    validate_args || exit 1
     if [[ "$dry_run" -eq 1 ]]; then
         info "Hysteria2 dry-run: no system changes will be made"
         info "Binary: $HYSTERIA_BINARY"
         info "Config: $HYSTERIA_CONFIG_FILE"
         info "Port: $port"
+        if [[ -n "$cf_token" ]]; then
+            info "TLS: Hysteria built-in ACME DNS-01 (Cloudflare)"
+        else
+            info "TLS: detect acme.sh certificate or prompt for certificate paths"
+        fi
         exit 0
     fi
     check_root
@@ -336,8 +400,7 @@ main() {
         uninstall_hysteria
         exit 0
     fi
-    validate_args || exit 1
-    find_certificate_pair || prompt_for_certificates || exit 1
+    select_tls_mode || exit 1
     install_dependencies curl
     install_binary || exit 1
     write_config

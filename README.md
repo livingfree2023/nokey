@@ -65,12 +65,12 @@ bash <(curl -fsSL https://raw.githubusercontent.com/livingfree2023/nokey/refs/he
 bash <(curl -fsSL https://raw.githubusercontent.com/livingfree2023/nokey/refs/heads/main/singbox.sh)
 bash <(curl -fsSL https://raw.githubusercontent.com/livingfree2023/nokey/refs/heads/main/bbr.sh)
 bash <(curl -fsSL https://raw.githubusercontent.com/livingfree2023/nokey/refs/heads/main/acme-cert.sh) --domain=example.com
-bash <(curl -fsSL https://raw.githubusercontent.com/livingfree2023/nokey/refs/heads/main/hysteria2.sh) --domain=example.com
+HYSTERIA_CF_TOKEN=your-cloudflare-token bash <(curl -fsSL https://raw.githubusercontent.com/livingfree2023/nokey/refs/heads/main/hysteria2.sh) --domain=example.com
 ```
 
 这些脚本会自动加载`nokey-common.sh`。需要JSON配置处理的功能会先检查并安装`jq`。
 
-菜单中的acme.sh功能使用Cloudflare DNS验证（输入API token时）或80端口HTTP验证，并把证书安装到`/etc/hysteria/`。Hysteria2会优先检测该目录和`~/.acme.sh/`中的证书；找不到时会提示输入证书和私钥路径。服务启动成功后，`nokey.url`会保存`hysteria2://`链接和Mihomo/Clash YAML配置。
+菜单中的acme.sh功能使用Cloudflare DNS验证（输入API token时）或80端口HTTP验证，并把证书安装到`/etc/hysteria/`。Hysteria2如果提供Cloudflare token，会优先使用内置ACME DNS验证；否则检测该目录和`~/.acme.sh/`中的证书，找不到时提示输入证书和私钥路径。服务启动成功后，`nokey.url`会保存`hysteria2://`链接和Mihomo/Clash YAML配置。
 
 ### 场景一：只安装Xray（默认，不带任何参数）
 ```

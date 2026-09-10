@@ -73,12 +73,12 @@ bash <(curl -fsSL https://raw.githubusercontent.com/livingfree2023/nokey/refs/he
 bash <(curl -fsSL https://raw.githubusercontent.com/livingfree2023/nokey/refs/heads/main/singbox.sh)
 bash <(curl -fsSL https://raw.githubusercontent.com/livingfree2023/nokey/refs/heads/main/bbr.sh)
 bash <(curl -fsSL https://raw.githubusercontent.com/livingfree2023/nokey/refs/heads/main/acme-cert.sh) --domain=example.com
-bash <(curl -fsSL https://raw.githubusercontent.com/livingfree2023/nokey/refs/heads/main/hysteria2.sh) --domain=example.com
+HYSTERIA_CF_TOKEN=your-cloudflare-token bash <(curl -fsSL https://raw.githubusercontent.com/livingfree2023/nokey/refs/heads/main/hysteria2.sh) --domain=example.com
 ```
 
 Each entrypoint loads `nokey-common.sh`; JSON-based features install `jq` through the detected package manager when it is missing.
 
-The acme.sh menu entry uses Cloudflare DNS validation when a token is entered, otherwise it uses standalone HTTP-01 on port 80. Certificates are installed under `/etc/hysteria/`. Hysteria2 first detects certificates there and in `~/.acme.sh/`; if none are found, it asks for certificate and key paths. After the service is active, `nokey.url` contains a `hysteria2://` share URL and a Mihomo/Clash YAML proxy entry.
+The acme.sh menu entry uses Cloudflare DNS validation when a token is entered, otherwise it uses standalone HTTP-01 on port 80. For Hysteria2, providing `HYSTERIA_CF_TOKEN` or entering a token uses Hysteria's built-in ACME DNS challenge; otherwise it detects certificates under `/etc/hysteria/` and `~/.acme.sh/`, then asks for certificate and key paths if needed. After the service is active, `nokey.url` contains a `hysteria2://` share URL and a Mihomo/Clash YAML proxy entry.
 
 ---
 

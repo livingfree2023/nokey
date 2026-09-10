@@ -28,6 +28,10 @@ acme_output="$(bash "$REPO_ROOT/acme-cert.sh" --domain=example.com --dry-run)"
 
 hysteria_output="$(bash "$REPO_ROOT/hysteria2.sh" --domain=example.com --dry-run)"
 [[ "$hysteria_output" == *"Hysteria2 dry-run"* ]]
+hysteria_acme_output="$(HYSTERIA_CF_TOKEN=test-token bash "$REPO_ROOT/hysteria2.sh" --domain=example.com --dry-run)"
+[[ "$hysteria_acme_output" == *"built-in ACME DNS-01"* ]]
+grep -q 'cloudflare_api_token' "$REPO_ROOT/hysteria2.sh"
+grep -q 'type: dns' "$REPO_ROOT/hysteria2.sh"
 
 [[ -x "$REPO_ROOT/hysteria2.rc" ]]
 grep -q 'ExecStart=/usr/local/bin/hysteria server --config /etc/hysteria/config.yaml' "$REPO_ROOT/hysteria2.service"

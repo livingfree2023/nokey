@@ -133,8 +133,12 @@ find_certificate_pair() {
 }
 
 prompt_for_certificates() {
-    if [[ -n "$cert_path" && -n "$key_path" ]]; then
-        return 0
+    if [[ -n "$cert_path" || -n "$key_path" ]]; then
+        if [[ -f "$cert_path" && -f "$key_path" ]]; then
+            return 0
+        fi
+        error "Certificate or private key file does not exist"
+        return 1
     fi
     if [[ ! -r /dev/tty ]]; then
         error "No ACME certificate found. Use --cert=PATH --key=PATH"

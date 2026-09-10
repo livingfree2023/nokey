@@ -31,6 +31,33 @@ hysteria_output="$(bash "$REPO_ROOT/hysteria2.sh" --domain=example.com --dry-run
 [[ -x "$REPO_ROOT/hysteria2.rc" ]]
 grep -q 'ExecStart=/usr/local/bin/hysteria server --config /etc/hysteria/config.yaml' "$REPO_ROOT/hysteria2.service"
 
+fixture_dir="$(mktemp -d)"
+trap 'rm -rf "$fixture_dir"' EXIT
+mkdir -p "$fixture_dir/.acme.sh/example.com_ecc"
+touch "$fixture_dir/.acme.sh/example.com_ecc/fullchain.cer" "$fixture_dir/.acme.sh/example.com_ecc/example.com.key"
+touch "$fixture_dir/custom.crt" "$fixture_dir/custom.key"
+(
+    LOG_FILE="$fixture_dir/log"
+    URL_FILE="$fixture_dir/url"
+    ACME_HOME="$fixture_dir/.acme.sh"
+    GITHUB_CMD=""
+    # shellcheck source=/dev/null
+    source "$REPO_ROOT/hysteria2.sh"
+    domain=example.com
+    find_certificate_pair
+    [[ "$cert_path" == *"fullchain.cer" ]]
+    [[ "$key_path" == *"example.com.key" ]]
+    cert_path="$fixture_dir/custom.crt"
+    key_path="$fixture_dir/custom.key"
+    find_certificate_pair
+    [[ "$cert_path" == *"custom.crt" ]]
+    [[ "$key_path" == *"custom.key" ]]
+    password=test-password
+    port=443
+    write_share_urls
+    grep -q "type: hysteria2" "$URL_FILE"
+)
+
 [[ "$(bash "$REPO_ROOT/xray-socks.sh" --help)" == *"Usage: xray-socks.sh"* ]]
 
 echo "All feature entrypoint tests passed."

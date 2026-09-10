@@ -8,7 +8,8 @@ readonly HYSTERIA_CERT_FILE="/etc/hysteria/fullchain.pem"
 readonly HYSTERIA_KEY_FILE="/etc/hysteria/private.key"
 readonly HYSTERIA_SERVICE_NAME="hysteria2.service"
 readonly HYSTERIA_SERVICE_NAME_ALPINE="hysteria2"
-readonly HYSTERIA_RELEASE_URL="https://github.com/apernet/hysteria/releases/latest/download/hysteria-linux"
+readonly HYSTERIA_VERSION="v2.9.2"
+readonly HYSTERIA_RELEASE_URL="https://github.com/apernet/hysteria/releases/download/app/${HYSTERIA_VERSION}/hysteria-linux"
 readonly HYSTERIA_SERVICE_URL="https://raw.githubusercontent.com/livingfree2023/nokey/refs/heads/main/hysteria2.service"
 readonly HYSTERIA_RC_URL="https://raw.githubusercontent.com/livingfree2023/nokey/refs/heads/main/hysteria2.rc"
 
@@ -115,6 +116,10 @@ find_certificate_pair() {
         "/root/.acme.sh/${domain}_ecc/fullchain.cer|/root/.acme.sh/${domain}_ecc/${domain}.key"
         "/root/.acme.sh/${domain}/fullchain.cer|/root/.acme.sh/${domain}/${domain}.key"
     )
+    if [[ -n "$cert_path" || -n "$key_path" ]]; then
+        [[ -f "$cert_path" && -f "$key_path" ]] || return 1
+        return 0
+    fi
     for base in "${candidates[@]}"; do
         cert_path="${base%%|*}"
         key_path="${base#*|}"
@@ -141,6 +146,15 @@ prompt_for_certificates() {
         error "Certificate or private key file does not exist"
         return 1
     }
+}
+
+yaml_quote() {
+    local value="$1"
+    value="${value//\\/\\\\}"
+    value="${value//\"/\\\"}"
+    value="${value//$'\n'/}"
+    value="${value//$'\r'/}"
+    printf '"%s"' "$value"
 }
 
 download_file() {
@@ -174,6 +188,17 @@ install_binary() {
         error "下载Hysteria2失败 / Failed to download Hysteria2"
         return 1
     fi
+    local expected_sha256=""
+    case "$arch" in
+        amd64) expected_sha256="86fef8e2f1b2bf41318ac96724eee6c3b449e4e510022cc89658b63a6713922a" ;;
+        arm64) expected_sha256="9ec8f49f4ea554b1cac04e6f3690cea76ff835082e943e54196d7f323fcfba71" ;;
+    esac
+    if ! command -v sha256sum >/dev/null 2>&1 || [[ "$(sha256sum "$temporary" | awk '{print $1}')" != "$expected_sha256" ]]; then
+        rm -f "$temporary"
+        task_fail
+        error "Hysteria2 checksum verification failed / Hysteria2校验和验证失败"
+        return 1
+    fi
     install -m 755 "$temporary" "$HYSTERIA_BINARY"
     rm -f "$temporary"
     task_done
@@ -184,15 +209,15 @@ write_config() {
     cat > "$HYSTERIA_CONFIG_FILE" <<EOF
 listen: :${port}
 tls:
-  cert: ${cert_path}
-  key: ${key_path}
+  cert: $(yaml_quote "$cert_path")
+  key: $(yaml_quote "$key_path")
 auth:
   type: password
-  password: ${password}
+  password: $(yaml_quote "$password")
 masquerade:
   type: proxy
   proxy:
-    url: ${masquerade_url}
+    url: $(yaml_quote "$masquerade_url")
     rewriteHost: true
 EOF
     chmod 600 "$HYSTERIA_CONFIG_FILE"
@@ -219,6 +244,7 @@ install_service_file() {
 install_openrc_service() {
     local destination="/etc/init.d/${HYSTERIA_SERVICE_NAME_ALPINE}"
     install_service_file hysteria2.rc "$HYSTERIA_RC_URL" "$destination" || return 1
+    chmod 755 "$destination"
     configure_openrc_crash_restart "$destination" || return 1
     rc-update add "$HYSTERIA_SERVICE_NAME_ALPINE" default >> "$LOG_FILE" 2>&1 || true
     rc-service "$HYSTERIA_SERVICE_NAME_ALPINE" restart >> "$LOG_FILE" 2>&1
@@ -260,10 +286,11 @@ write_share_urls() {
         echo "      - h3"
         echo "    skip-cert-verify: false"
     } > "$URL_FILE"
+    chmod 600 "$URL_FILE"
     success "Hysteria2 is running"
-    info "Share URL: $share_url"
+    printf 'Share URL: %s\n' "$share_url"
     info "Mihomo/Clash YAML saved to: $URL_FILE"
-    tee -a "$LOG_FILE" < "$URL_FILE"
+    cat "$URL_FILE"
 }
 
 uninstall_hysteria() {
@@ -292,6 +319,7 @@ main() {
         exit 0
     fi
     check_root
+    umask 077
     init_output_files
     if [[ "$remove_mode" -eq 1 ]]; then
         uninstall_hysteria

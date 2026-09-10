@@ -35,7 +35,7 @@ if [[ -f /etc/os-release ]]; then
 fi
 
 show_help() {
-    echo "Usage: acme-cert.sh --domain=DOMAIN [--email=EMAIL] [--cf-token=TOKEN] [--force] [--dry-run]"
+    echo "Usage: CF_Token=TOKEN acme-cert.sh --domain=DOMAIN [--email=EMAIL] [--force] [--dry-run]"
     echo "Without a Cloudflare token, acme.sh uses standalone HTTP-01 on port 80."
 }
 
@@ -66,7 +66,6 @@ parse_args() {
         case "$arg" in
             --domain=*) domain="${arg#*=}" ;;
             --email=*) email="${arg#*=}" ;;
-            --cf-token=*) cf_token="${arg#*=}" ;;
             --force) force_issue=1 ;;
             --dry-run) dry_run=1 ;;
             --help) show_help; exit 0 ;;
@@ -178,6 +177,7 @@ main() {
     fi
 
     check_root
+    umask 077
     init_output_files
     install_dependencies curl socat openssl
     ensure_acme_binary || exit 1
